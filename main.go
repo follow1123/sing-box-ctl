@@ -1,7 +1,7 @@
 package main
 
-import "fmt"
+import "github.com/follow1123/sing-box-ctl/cmd"
 
 func main() {
-	fmt.Println("Hello World!")
+	cmd.Execute()
 }
