@@ -1,6 +1,6 @@
 package logger
 
-var Production string
+var Production string = "true"
 
 type Logger interface {
 	Debug(template string, args ...any)
@@ -12,5 +12,5 @@ type Logger interface {
 }
 
 func isProduction() bool {
-	return Production == "prod"
+	return Production == "true"
 }

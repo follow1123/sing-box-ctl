@@ -1,52 +1,63 @@
 const std = @import("std");
 
 const APP_NAME = "sbctl";
-const VERSION = "0.1.0";
-const SING_BOX_VERSION = "0.11.x";
+
+const Params = struct {
+    b: *std.Build,
+    dev_config_home: []const u8,
+    prod: bool,
+    app_full_path: []const u8,
+
+    pub fn init(b: *std.Build) Params {
+        const dev_config_home = b.option([]const u8, "config-home", "Set config home directory for development") orelse b.pathJoin(&.{ b.install_prefix, "dev-config-home" });
+        const prod = b.option(bool, "prod", "Build with production mode") orelse false;
+        return .{
+            .b = b,
+            .dev_config_home = dev_config_home,
+            .prod = prod,
+            .app_full_path = b.pathJoin(&.{ b.install_prefix, APP_NAME }),
+        };
+    }
+};
 
 pub fn build(b: *std.Build) !void {
-    const alloc = b.allocator;
     const target = b.standardTargetOptions(.{});
-    const mod_name = try getGoModuleName(alloc);
 
-    var version = b.option([]const u8, "version", "Specify the program version") orelse VERSION;
-    const sb_version = b.option([]const u8, "sing-box-version", "Specify supported sing-box version") orelse SING_BOX_VERSION;
-    var config_home = b.option([]const u8, "config-home", "App home directory") orelse switch (target.result.os.tag) {
-        .linux => "/etc/sing-box-ctl",
-        .windows => "%LOCALAPPDATA%/sing-box-ctl",
-        inline else => unreachable,
-    };
-    const prod = b.option(bool, "prod", "Build with production mode") orelse false;
-    if (!prod) {
-        config_home = b.pathJoin(&.{ b.install_prefix, "sing-box-ctl" });
-        version = "dev";
-    }
+    var params = Params.init(b);
 
-    const app_full_path = b.pathJoin(&.{ b.install_prefix, APP_NAME });
-    const go_build = b.addSystemCommand(&.{ "go", "build", "-o", app_full_path });
-
-    const go_ldflags = try std.mem.join(alloc, " ", &.{
-        b.fmt("-X {s}/cmd.Version={s}", .{ mod_name, version }),
-        b.fmt("-X {s}/cmd.SingBoxVersion={s}", .{ mod_name, sb_version }),
-        b.fmt("-X {s}/config.ConfigHome={s}", .{ mod_name, config_home }),
-        b.fmt("-X {s}/logger.Production={s}", .{ mod_name, if (prod) "prod" else "" }),
-    });
-
-    go_build.addArgs(&.{ "-ldflags", go_ldflags });
-    go_build.setEnvironmentVariable("CGO_ENABLED", "0");
-    go_build.setEnvironmentVariable("GOARCH", arch2go(target.result.cpu.arch));
-    go_build.setEnvironmentVariable("GOOS", @tagName(target.result.os.tag));
-
+    const go_build = try goBuildStep(b, target, &params);
     b.getInstallStep().dependOn(&go_build.step);
 
-    const go_run = b.addSystemCommand(&.{app_full_path});
-
-    if (b.args) |args| go_run.addArgs(args);
-
+    const go_run = try goRunStep(b, &params);
     go_run.step.dependOn(&go_build.step);
 
     const run_step = b.step("run", "Run the Go application");
     run_step.dependOn(&go_run.step);
+}
+
+fn goRunStep(b: *std.Build, params: *Params) !*std.Build.Step.Run {
+    const go_run = b.addSystemCommand(&.{params.app_full_path});
+
+    if (b.args) |args| go_run.addArgs(args);
+    return go_run;
+}
+
+fn goBuildStep(b: *std.Build, target: std.Build.ResolvedTarget, params: *Params) !*std.Build.Step.Run {
+    const mod_name = try getGoModuleName(b.allocator);
+    const go_build = b.addSystemCommand(&.{ "go", "build", "-o", params.app_full_path });
+
+    var ldflags = std.ArrayList([]const u8).init(b.allocator);
+    try ldflags.append(b.fmt("-X {s}/logger.Production={s}", .{ mod_name, if (params.prod) "true" else "false" }));
+    if (!params.prod) {
+        try ldflags.append(b.fmt("-X {s}/config.ConfigHome={s}", .{ mod_name, params.dev_config_home }));
+    }
+
+    const go_ldflags = try std.mem.join(b.allocator, " ", ldflags.items);
+    go_build.addArgs(&.{ "-ldflags", go_ldflags });
+    go_build.setEnvironmentVariable("CGO_ENABLED", "0");
+    go_build.setEnvironmentVariable("GOARCH", arch2go(target.result.cpu.arch));
+    go_build.setEnvironmentVariable("GOOS", @tagName(target.result.os.tag));
+    return go_build;
 }
 
 fn getGoModuleName(alloc: std.mem.Allocator) ![]const u8 {

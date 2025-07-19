@@ -7,8 +7,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var Version string
-var SingBoxVersion string
+const (
+	Version        = "0.1.0"
+	SingBoxVersion = "0.11.x"
+)
 
 var rootFlagVersion bool
 
