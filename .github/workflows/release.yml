@@ -17,11 +17,12 @@ jobs:
         with:
           version: 0.14.1
       - name: Build
-        run: zig build releases
+        run: zig build releases -Dtag=${{ github.ref_name }}
       - name: Compress
         run: |
           mkdir zig-out/releases
-          /bin/ls zig-out/targets | awk '{if (index($0, "windows") > 0) { system("zip -r zig-out/releases/" $0 " zig-out/targets/" $0) } else { system("tar -czvf zig-out/releases/" $0 ".tar.gz zig-out/targets/" $0) }}'
+          cd zig-out/targets
+          /bin/ls | awk '{if (index($0, "windows") > 0) { system("zip -r ../releases/" $0 ".zip " $0) } else { system("tar -czvf ../releases/" $0 ".tar.gz " $0) }}'
       - name: Sum
         run: |
           cd zig-out/releases

@@ -7,8 +7,10 @@ const Params = struct {
     dev_config_home: []const u8,
     prod: bool,
     app_full_path: []const u8,
+    tag: []const u8,
 
     pub fn init(b: *std.Build) Params {
+        const tag = b.option([]const u8, "tag", "Set releases version from git tags") orelse "unknown";
         const dev_config_home = b.option([]const u8, "config-home", "Set config home directory for development") orelse b.pathJoin(&.{ b.install_prefix, "dev-config-home" });
         const prod = b.option(bool, "prod", "Build with production mode") orelse false;
         return .{
@@ -16,6 +18,7 @@ const Params = struct {
             .dev_config_home = dev_config_home,
             .prod = prod,
             .app_full_path = b.pathJoin(&.{ b.install_prefix, APP_NAME }),
+            .tag = tag,
         };
     }
 };
@@ -64,7 +67,8 @@ fn goBuildStep(b: *std.Build, target: std.Build.ResolvedTarget, params: *Params,
     var app_full_path: []const u8 = undefined;
     if (release_targets_dir) |targets_dir| {
         prod = true;
-        const target_path = try target.query.zigTriple(b.allocator);
+        const target_name = try target.query.zigTriple(b.allocator);
+        const target_path = b.fmt("{s}_{s}_{s}", .{ APP_NAME, params.tag, target_name });
         app_full_path = b.pathJoin(&.{ b.install_prefix, targets_dir, target_path, APP_NAME });
     } else {
         app_full_path = params.app_full_path;
