@@ -1,0 +1,245 @@
+{
+  "log": {
+    "disabled": false,
+    "level": "info",
+    "output": "box.log",
+    "timestamp": true
+  },
+  "experimental": {
+    "clash_api": {
+      "external_controller": "127.0.0.1:9090",
+      "external_ui": "./ui/",
+      "external_ui_download_detour": "节点选择",
+      "secret": "",
+      "default_mode": "rule"
+    },
+    "cache_file": {
+      "enabled": true
+    }
+  },
+  "dns": {
+    "servers": [
+      {
+        "type": "udp",
+        "tag": "dns-google-udp",
+        "server": "8.8.8.8",
+        "detour": "节点选择"
+      },
+      {
+        "type": "https",
+        "tag": "dns-google",
+        "server": "dns.google",
+        "domain_resolver": "dns-google-udp",
+        "detour": "节点选择"
+      },
+      {
+        "type": "https",
+        "tag": "dns-ali",
+        "server": "dns.alidns.com",
+        "domain_resolver": "dns-114"
+      },
+      {
+        "type": "udp",
+        "tag": "dns-114",
+        "server": "114.114.114.114"
+      }
+    ],
+    "rules": [
+      { "clash_mode": "direct", "server": "dns-ali" },
+      { "clash_mode": "global", "server": "dns-google" },
+{{- range .Rules}}
+      { "rule_set": "{{.RuleSet}}", "server": {{- if eq .Outbound "直连"}} "dns-ali" {{- else}} "dns-google" {{- end}}},
+{{- end}}
+      { "rule_set": "geosite-cn", "server": "dns-ali" },
+      { "rule_set": "geosite-geolocation-!cn", "server": "dns-google" }
+    ],
+    "strategy": "ipv4_only",
+    "final": "dns-google",
+    "client_subnet": "114.114.114.114/24"
+  },
+  "inbounds": [
+    {
+      "type": "mixed",
+      "tag": "mixed-in",
+      "listen": "::",
+      "listen_port": 7899,
+      "set_system_proxy": false
+    }
+  ],
+  "outbounds": [
+{{- range .Outbounds}}
+    {
+      "type": "{{.Type}}",
+      "tag": "{{.Tag}}",
+  {{- if eq .Type "shadowsocks"}}
+  {{- with .Protocol}}
+      "server": "{{.Server}}",
+      "server_port": {{.ServerPort}},
+      "method": "{{.Method}}",
+      "password": "{{.Password}}",
+      "network": "{{.Network}}"
+  {{- end}}
+  {{- else if eq .Type "trojan"}}
+  {{- with .Protocol}}
+      "server": "{{.Server}}",
+      "server_port": {{.ServerPort}},
+      "password": "{{.Password}}",
+      "network": "{{.Network}}",
+    {{- with .Tls}}
+      "tls": {
+        "enabled": {{.Enabled}},
+        "server_name": "{{.ServerName}}"
+      }
+    {{- end}}
+  {{- end}}
+  {{- end}}
+    },
+{{- end}}
+    {
+      "type": "selector",
+      "tag": "节点选择",
+      "interrupt_exist_connections": false,
+      "outbounds": [
+        "自动选择",
+      {{- range $idx, $ele := .Outbounds }}
+        {{- if $idx}},{{end}}
+        "{{$ele.Tag}}"
+      {{- end}}
+      ]
+    },
+    {
+      "type": "urltest",
+      "tag": "自动选择",
+      "interrupt_exist_connections": false,
+      "interval": "10m",
+      "outbounds": [
+      {{- range $idx, $ele := .Outbounds }}
+        {{- if $idx}},{{end}}
+        "{{$ele.Tag}}"
+      {{- end}}
+      ]
+    },
+    {
+      "type": "selector",
+      "tag": "OPENAI",
+      "interrupt_exist_connections": false,
+      "outbounds": [
+      {{- range $ele := nodeFilter .Outbounds "台湾"}}
+        "{{$ele}}",
+      {{- end}}
+        "自动选择",
+        "节点选择"
+      ]
+    },
+    {
+      "type": "selector",
+      "tag": "MICROSOFT",
+      "interrupt_exist_connections": false,
+      "outbounds": [
+        "直连",
+        "自动选择",
+        "节点选择"
+      ],
+      "default": "直连"
+    },
+    {
+      "type": "direct",
+      "tag": "直连"
+    },
+    {
+      "type": "selector",
+      "tag": "漏网之鱼",
+      "interrupt_exist_connections": false,
+      "outbounds": [ "节点选择", "直连" ],
+      "default": "节点选择"
+    }
+  ],
+  "route": {
+    "rules": [
+      { "action": "sniff" },
+      {
+        "type": "logical",
+        "mode": "or",
+        "rules": [ { "protocol": "dns" }, { "port": 53 } ],
+        "action": "hijack-dns"
+      },
+      { "ip_is_private": true, "outbound": "直连"},
+      { "clash_mode": "direct", "outbound": "直连" },
+      { "clash_mode": "global", "outbound": "节点选择" },
+      { "rule_set": "geosite-openai", "outbound": "OPENAI" },
+      { "rule_set": "geosite-github", "outbound": "节点选择" },
+      { "rule_set": "geosite-microsoft", "outbound": "MICROSOFT" },
+      {{- range .Rules}}
+      { "rule_set": "{{.RuleSet}}", "outbound": "{{.Outbound}}"},
+      {{- end}}
+      { "rule_set": ["geosite-cn", "geoip-cn"], "outbound": "直连" },
+      { "rule_set": "geosite-geolocation-!cn", "outbound": "节点选择" }
+    ],
+    "default_domain_resolver": "dns-ali",
+    "auto_detect_interface": true,
+    "final": "漏网之鱼",
+    "rule_set": [
+      {{- range .InlineRuleSet}}
+      {
+        "type": "inline",
+        "tag": "{{.Tag}}",
+        "rules": [
+          {
+            {{- range $i, $e := .HeadlessRule.Conditions}}
+            {{- if $i}},{{end}}
+            "{{$e.Name}}": [
+            {{- range $idx, $ele := $e.Value}}
+            {{- if $idx}},{{end}}
+              "{{$ele}}"
+            {{- end}}
+            ]
+            {{- end}}
+          }
+        ]
+      },
+      {{- end}}
+      {
+        "tag": "geosite-cn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/cn.srs",
+        "download_detour": "节点选择"
+      },
+      {
+        "tag": "geosite-openai",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/openai.srs",
+        "download_detour": "节点选择"
+      },
+      {
+        "tag": "geosite-github",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/github.srs",
+        "download_detour": "节点选择"
+      },
+      {
+        "tag": "geosite-microsoft",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/microsoft.srs",
+        "download_detour": "节点选择"
+      },
+      {
+        "tag": "geosite-geolocation-!cn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/geolocation-!cn.srs",
+        "download_detour": "节点选择"
+      },
+      {
+        "tag": "geoip-cn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geoip/cn.srs",
+        "download_detour": "节点选择"
+      }
+    ]
+  }
+}
