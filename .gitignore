@@ -1,4 +1,5 @@
+sing-box-ctl.exe
 sing-box-ctl
 
-.zig-cache
-zig-out
+sbctl
+sbctl.exe
