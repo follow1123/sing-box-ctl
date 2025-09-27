@@ -7,29 +7,36 @@ on:
 jobs:
   releases:
     runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        os: [linux, windows]
+        arch: [amd64]
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24.1'
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.14.1
-      - name: Build
-        run: zig build releases -Dtag=${{ github.ref_name }}
-      - name: Compress
+      - name: Build Binary
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
         run: |
-          mkdir zig-out/releases
-          cd zig-out/targets
-          /bin/ls | awk '{if (index($0, "windows") > 0) { system("zip -r ../releases/" $0 ".zip " $0) } else { system("tar -czvf ../releases/" $0 ".tar.gz " $0) }}'
+          mkdir -p dist/
+          output_name=sbctl-${{ matrix.os }}-${{ matrix.arch }}
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            output_name="$output_name.exe"
+          fi
+          go build -o dist/$output_name ./
       - name: Sum
         run: |
-          cd zig-out/releases
+          cd dist
           sha256sum ./* > checksums.txt
       - name: Release
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          files: zig-out/releases/*
+          files: dist/*
