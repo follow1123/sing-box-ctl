@@ -10,10 +10,11 @@ import (
 )
 
 var providerCmd = &cobra.Command{
-	Use:   "provider",
-	Short: "list provider config",
+	Use:          "provider",
+	Short:        "Manage provider config",
+	SilenceUsage: true, // 关闭错误时的帮助信息
+	GroupID:      cmdGrpDefault,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cmd.SilenceUsage = true
 		conf, err := config.Default()
 		if err != nil {
 			return err

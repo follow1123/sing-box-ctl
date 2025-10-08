@@ -11,10 +11,11 @@ import (
 )
 
 var logCmd = &cobra.Command{
-	Use:   "log",
-	Short: "print log",
+	Use:          "log",
+	Short:        "Print log",
+	SilenceUsage: true, // 关闭错误时的帮助信息
+	GroupID:      cmdGrpDefault,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cmd.SilenceUsage = true
 		// 初始化配置
 		conf, err := config.Default()
 		if err != nil {

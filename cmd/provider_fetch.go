@@ -19,10 +19,10 @@ var (
 )
 
 var providerFetchCmd = &cobra.Command{
-	Use:   "fetch",
-	Short: "Fetch and convert config from default provider",
+	Use:          "fetch",
+	Short:        "Fetch and convert config from default provider",
+	SilenceUsage: true, // 关闭错误时的帮助信息
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cmd.SilenceUsage = true
 		conf, err := config.Default()
 		if err != nil {
 			return err

@@ -7,10 +7,11 @@ import (
 )
 
 var startCmd = &cobra.Command{
-	Use:   "start",
-	Short: "Start sing-box",
+	Use:          "start",
+	Short:        "Start sing-box",
+	SilenceUsage: true, // 关闭错误时的帮助信息
+	GroupID:      cmdGrpDefault,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cmd.SilenceUsage = true
 		conf, err := config.Default()
 		if err != nil {
 			return err

@@ -7,13 +7,11 @@ import (
 )
 
 var providerDeleteCmd = &cobra.Command{
-	Use:   "delete <name>",
-	Short: "Delete provider by name",
-	Args:  cobra.ExactArgs(1),
-	Long: `Arguments:
-	<name> string 	provider name`,
+	Use:          "delete [flags] name",
+	Short:        "Delete provider by name",
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true, // 关闭错误时的帮助信息
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cmd.SilenceUsage = true
 		conf, err := config.Default()
 		if err != nil {
 			return err

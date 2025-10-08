@@ -14,11 +14,11 @@ import (
 )
 
 var statusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Start sing-box",
+	Use:          "status",
+	Short:        "Status of sing-box",
+	SilenceUsage: true, // 关闭错误时的帮助信息
+	GroupID:      cmdGrpDefault,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cmd.SilenceUsage = true
-
 		conf, err := config.Default()
 		if err != nil {
 			return err

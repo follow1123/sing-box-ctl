@@ -11,6 +11,11 @@ const (
 	SingBoxVersion = "0.12.x"
 )
 
+const (
+	cmdGrpDefault = "available"
+	cmdGrpWindows = "windows"
+)
+
 var rootFlagVersion bool
 
 var rootCmd = &cobra.Command{
@@ -34,4 +39,6 @@ func Execute() {
 
 func init() {
 	rootCmd.Flags().BoolVarP(&rootFlagVersion, "version", "v", false, "print version")
+
+	rootCmd.AddGroup(&cobra.Group{ID: cmdGrpDefault, Title: "Available Commands"})
 }

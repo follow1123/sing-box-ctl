@@ -11,14 +11,11 @@ var (
 )
 
 var providerAddCmd = &cobra.Command{
-	Use:   "add <name> <url>",
-	Short: "Add provider",
-	Args:  cobra.ExactArgs(2),
-	Long: `Arguments:
-	<name> string 	provider name
-	<url> string	provider url`,
+	Use:          "add [flags] name url",
+	Short:        "Add provider",
+	Args:         cobra.ExactArgs(2),
+	SilenceUsage: true, // 关闭错误时的帮助信息
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cmd.SilenceUsage = true
 		conf, err := config.Default()
 		if err != nil {
 			return err

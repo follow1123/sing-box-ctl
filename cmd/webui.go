@@ -14,10 +14,11 @@ import (
 )
 
 var webuiCmd = &cobra.Command{
-	Use:   "webui",
-	Short: "Open web UI with default browser",
+	Use:          "webui",
+	Short:        "Open web UI with default browser",
+	SilenceUsage: true, // 关闭错误时的帮助信息
+	GroupID:      cmdGrpDefault,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cmd.SilenceUsage = true
 		// 初始化配置
 		conf, err := config.Default()
 		if err != nil {

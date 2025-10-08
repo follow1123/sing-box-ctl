@@ -19,10 +19,11 @@ var (
 )
 
 var restoreCmd = &cobra.Command{
-	Use:   "restore",
-	Short: "Restore config from last provider archived config",
+	Use:          "restore",
+	Short:        "Restore config from last provider archived config",
+	SilenceUsage: true, // 关闭错误时的帮助信息
+	GroupID:      cmdGrpDefault,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cmd.SilenceUsage = true
 		conf, err := config.Default()
 		if err != nil {
 			return err

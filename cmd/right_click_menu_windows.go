@@ -71,8 +71,9 @@ var rcmenuCmd = &cobra.Command{
 		menuMixedDenyLAN,
 		menuEnableTunMode,
 	),
+	SilenceUsage: true, // 关闭错误时的帮助信息
+	GroupID:      cmdGrpDefault,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cmd.SilenceUsage = true
 		if rcmenuFlagInit {
 			return initMenu()
 		}
@@ -170,6 +171,10 @@ var rcmenuCmd = &cobra.Command{
 }
 
 func init() {
+	if !rootCmd.ContainsGroup(cmdGrpWindows) {
+		rootCmd.AddGroup(&cobra.Group{ID: cmdGrpWindows, Title: "Windows Integration Commands"})
+	}
+
 	rcmenuCmd.Flags().BoolVarP(&rcmenuFlagInit, "init", "i", false, "init right-click menu")
 	rcmenuCmd.Flags().BoolVarP(&rcmenuFlagDelete, "delete", "d", false, "delete right-click menu")
 	rootCmd.AddCommand(rcmenuCmd)

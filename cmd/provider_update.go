@@ -13,8 +13,9 @@ var (
 )
 
 var providerUpdateCmd = &cobra.Command{
-	Use:   "update <name> [url]",
-	Short: "Update provider",
+	Use:          "update [flags] name [url]",
+	Short:        "Update provider",
+	SilenceUsage: true, // 关闭错误时的帮助信息
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 {
 			return fmt.Errorf("'name' is required")
@@ -24,11 +25,7 @@ var providerUpdateCmd = &cobra.Command{
 		}
 		return nil
 	},
-	Long: `Arguments:
-	<name> string 	provider name
-	[url] string	provider url (optinoal)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cmd.SilenceUsage = true
 		conf, err := config.Default()
 		if err != nil {
 			return err

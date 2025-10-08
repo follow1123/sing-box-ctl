@@ -21,8 +21,10 @@ var (
 )
 
 var shareCmd = &cobra.Command{
-	Use:   "share",
-	Short: "Share configuration via http",
+	Use:          "share",
+	Short:        "Share configuration via http",
+	SilenceUsage: true, // 关闭错误时的帮助信息
+	GroupID:      cmdGrpDefault,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s, err := httpshare.New(shareFlagPort)
 		if err != nil {

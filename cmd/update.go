@@ -29,10 +29,11 @@ var (
 )
 
 var updateCmd = &cobra.Command{
-	Use:   "update",
-	Short: "Modify the configuration file you specified",
+	Use:          "update",
+	Short:        "Modify the configuration file you specified",
+	SilenceUsage: true, // 关闭错误时的帮助信息
+	GroupID:      cmdGrpDefault,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cmd.SilenceUsage = true
 		// 初始化配置
 		conf, err := config.Default()
 		if err != nil {
