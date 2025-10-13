@@ -110,6 +110,12 @@ sbctl share
 
 # 使用系统默认浏览器打开 web ui
 sbctl webui
+
+# 从上次下载的订阅配置恢复到配置文件（手动修改配置后可使用这个命令恢复）
+sbctl restore
+
+# 查看日志
+sbctl log
 ```
 
 ---
