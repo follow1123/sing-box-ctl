@@ -30,9 +30,7 @@ var providerAddCmd = &cobra.Command{
 			return err
 		}
 		if providerAddFlagSetDefault {
-			if err := provider.SetDefault(name); err != nil {
-				return err
-			}
+			provider.SetDefault(name)
 		}
 		if err := provider.Save(); err != nil {
 			return err

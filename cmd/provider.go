@@ -24,18 +24,12 @@ var providerCmd = &cobra.Command{
 			return err
 		}
 		var tableData [][]string
-		providers, err := provider.List()
-		if err != nil {
-			return err
-		}
+		providers := provider.List()
 		if len(providers) == 0 {
 			cmd.Println("no provider use 'provider add' subcommand to add")
 			return nil
 		}
-		defaultProvider, err := provider.GetDefault()
-		if err != nil {
-			return err
-		}
+		defaultProvider := provider.GetDefault()
 		for _, p := range providers {
 			if p.Name == defaultProvider.Name {
 				tableData = append(tableData, []string{p.Name, p.Url, "*"})

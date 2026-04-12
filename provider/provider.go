@@ -3,54 +3,46 @@ package provider
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
-
-	"github.com/follow1123/sing-box-ctl/jsonhandler"
+	"slices"
 )
 
 type Provider struct {
-	path string
-	jh   *jsonhandler.JsonHandler
+	path   string
+	config *SingBoxCtlConfig
 }
 
 func New(path string) (*Provider, error) {
-	var jh *jsonhandler.JsonHandler
-	_, err := os.Stat(path)
+	config := &SingBoxCtlConfig{}
+	data, err := os.ReadFile(path)
+	var notExists bool
 	if err != nil {
 		if os.IsNotExist(err) {
-			jh, err = jsonhandler.FromData([]byte("{}"))
-			if err != nil {
-				return nil, err
-			}
-
+			notExists = true
 		} else {
 			return nil, fmt.Errorf("check provider config '%s' error:\n\t%w", path, err)
 		}
 	}
-	if jh == nil {
-		jh, err = jsonhandler.FromFile(path)
-		if err != nil {
-			return nil, err
+	if !notExists {
+		if err := json.Unmarshal(data, config); err != nil {
+			return nil, fmt.Errorf("unmarshal json error:\n\t%w", err)
 		}
+
 	}
 	return &Provider{
-		path: path,
-		jh:   jh,
+		path:   path,
+		config: config,
 	}, nil
 }
 
 func (p *Provider) Add(name string, url string) error {
-	providers, err := p.List()
+	providers := p.config.Providers
 	var setDefault bool
-	if err != nil {
-		setDefault = true
-	}
 	if len(providers) == 0 {
 		setDefault = true
 	}
@@ -60,32 +52,33 @@ func (p *Provider) Add(name string, url string) error {
 		}
 	}
 	if setDefault {
-		if err := p.SetDefault(name); err != nil {
-			return err
-		}
+		p.SetDefault(name)
 	}
-	if err := p.jh.Set("providers.-1", map[string]string{"name": name, "url": url}); err != nil {
-		return err
-	}
+	p.config.Providers = append(p.config.Providers, ProviderConfig{
+		Name: name,
+		Url:  url,
+	})
 	return nil
 }
 
 func (p *Provider) Update(name string, url string) error {
-	if _, err := p.Get(name); err != nil {
-		return err
+	var idx int = -1
+	for i, p := range p.config.Providers {
+		if p.Name == name {
+			idx = i
+			break
+		}
 	}
-
-	if err := p.jh.Set(fmt.Sprintf(`providers.#(name=="%s").url`, name), url); err != nil {
-		return err
+	if idx < 0 {
+		return fmt.Errorf("no provider named: %s", name)
+	} else {
+		p.config.Providers[idx].Url = url
 	}
 	return nil
 }
 
 func (p *Provider) Delete(name string) error {
-	providers, err := p.List()
-	if err != nil {
-		return err
-	}
+	providers := p.config.Providers
 	var idx = -1
 	for i, p := range providers {
 		if p.Name == name {
@@ -96,10 +89,7 @@ func (p *Provider) Delete(name string) error {
 	if idx < 0 {
 		return nil
 	}
-	defaultName, err := p.getDefaultName()
-	if err != nil {
-		return err
-	}
+	defaultName := p.config.DefaultProvider
 	// 删除的是默认 provider 修改默认为上一个
 	if defaultName == providers[idx].Name {
 		// 只有一个，直接删除默认 provider
@@ -113,70 +103,46 @@ func (p *Provider) Delete(name string) error {
 			p.SetDefault(providers[nextDefaultIdx].Name)
 		}
 	}
-	return p.deleteByIndex(idx)
+
+	p.config.Providers = slices.Delete(p.config.Providers, idx, idx+1)
+	return nil
 }
 
-func (p *Provider) SetDefault(name string) error {
-	return p.jh.Set("default_provider", name)
+func (p *Provider) SetDefault(name string) {
+	p.config.DefaultProvider = name
 }
 
-func (p *Provider) Get(name string) (*Data, error) {
-	providers, err := p.List()
-	if err != nil {
-		return nil, err
-	}
-	for _, p := range providers {
+func (p *Provider) Get(name string) *ProviderConfig {
+	for _, p := range p.config.Providers {
 		if p.Name == name {
-			return &p, nil
+			return &p
 		}
 	}
-	return nil, fmt.Errorf("provider '%s' not exists", name)
+	return nil
 }
 
-func (p *Provider) GetDefault() (*Data, error) {
-	name, err := p.getDefaultName()
-	if err != nil {
-		return nil, err
-	}
-	return p.Get(name)
+func (p *Provider) GetDefault() *ProviderConfig {
+	return p.Get(p.config.DefaultProvider)
 }
 
-func (p *Provider) List() ([]Data, error) {
-	result, exists := p.jh.GetResult("providers")
-	var list []Data
-	if !exists {
-		return list, errors.New("no providers")
-	}
-	if !result.IsArray() {
-		return nil, errors.New("providers must be array")
-	}
-	if err := json.Unmarshal([]byte(result.Raw), &list); err != nil {
-		return nil, fmt.Errorf("unmarshal providers error:\n\t%w", err)
-	}
-	return list, nil
+func (p *Provider) List() []ProviderConfig {
+	return p.config.Providers
 }
 
 func (p *Provider) Save() error {
-	if err := p.jh.Format(); err != nil {
-		return err
+	data, err := json.MarshalIndent(p.config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal to json error:\n\t%w", err)
 	}
-	return p.jh.SaveTo(p.path)
-}
 
-func (p *Provider) deleteByIndex(idx int) error {
-	return p.jh.Delete(fmt.Sprintf("providers.%d", idx))
-}
-
-func (p *Provider) getDefaultName() (string, error) {
-	defaultName, exists := p.jh.GetString("default_provider")
-	if !exists {
-		return "", errors.New("no default provider")
+	if err := os.WriteFile(p.path, data, 0660); err != nil {
+		return fmt.Errorf("save config to %s error:\n\t%w", p.path, err)
 	}
-	return defaultName, nil
+	return nil
 }
 
-func (p *Provider) deleteDefaultProvider() error {
-	return p.jh.Delete("default_provider")
+func (p *Provider) deleteDefaultProvider() {
+	p.config.DefaultProvider = ""
 }
 
 type Data struct {

@@ -1,4 +1,30 @@
 {
+  "custom": {
+    "default_inbound_index": 0,
+    "node_selection_group_name": "节点选择",
+    "auto_selection_group_name": "自动选择",
+    "direct_group_name": "直连",
+    "escape_group_name": "漏网之鱼",
+    "direct_dns_server": "dns-ali",
+    "proxy_dns_server": "dns-google",
+    "direct_rule_keywords": ["直连", "direct", "绕过代理"],
+    "direct_ruleset_index_in_dns": 2,
+    "proxy_ruleset_index_in_dns": 3,
+    "direct_ruleset_index_in_route": 8,
+    "proxy_ruleset_index_in_route": 9,
+    "selectors": [
+      {
+        "tag": "OPENAI",
+        "type": "selector",
+        "keywords": ["台湾"]
+      },
+      {
+        "tag": "MICROSOFT",
+        "type": "selector",
+        "default": "直连"
+      }
+    ]
+  },
   "log": {
     "disabled": false,
     "level": "info",
@@ -47,9 +73,6 @@
     "rules": [
       { "clash_mode": "direct", "server": "dns-ali" },
       { "clash_mode": "global", "server": "dns-google" },
-{{- range .Rules}}
-      { "rule_set": "{{.RuleSet}}", "server": {{- if eq .Outbound "直连"}} "dns-ali" {{- else}} "dns-google" {{- end}}},
-{{- end}}
       { "rule_set": "geosite-cn", "server": "dns-ali" },
       { "rule_set": "geosite-geolocation-!cn", "server": "dns-google" }
     ],
@@ -61,117 +84,35 @@
     {
       "type": "mixed",
       "tag": "mixed-in",
-      "listen": "::",
+      "listen": "127.0.0.1",
       "listen_port": 7899,
       "set_system_proxy": false
+    },
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "interface_name": "tun0",
+      "address": "172.18.0.1/30",
+      "mtu": 9000,
+      "auto_route": true
     }
   ],
-  "outbounds": [
-{{- range .Outbounds}}
-    {
-      "type": "{{.Type}}",
-      "tag": "{{.Tag}}",
-  {{- if eq .Type "shadowsocks"}}
-  {{- with .Protocol}}
-      "server": "{{.Server}}",
-      "server_port": {{.ServerPort}},
-      "method": "{{.Method}}",
-      "password": "{{.Password}}",
-      "network": "{{.Network}}"
-  {{- end}}
-  {{- else if eq .Type "trojan"}}
-  {{- with .Protocol}}
-      "server": "{{.Server}}",
-      "server_port": {{.ServerPort}},
-      "password": "{{.Password}}",
-      "network": "{{.Network}}",
-    {{- with .Tls}}
-      "tls": {
-        "enabled": {{.Enabled}},
-        "server_name": "{{.ServerName}}"
-      }
-    {{- end}}
-  {{- end}}
-  {{- end}}
-    },
-{{- end}}
-    {
-      "type": "selector",
-      "tag": "节点选择",
-      "interrupt_exist_connections": false,
-      "outbounds": [
-        "自动选择",
-      {{- range $idx, $ele := .Outbounds }}
-        {{- if $idx}},{{end}}
-        "{{$ele.Tag}}"
-      {{- end}}
-      ]
-    },
-    {
-      "type": "urltest",
-      "tag": "自动选择",
-      "interrupt_exist_connections": false,
-      "interval": "10m",
-      "outbounds": [
-      {{- range $idx, $ele := .Outbounds }}
-        {{- if $idx}},{{end}}
-        "{{$ele.Tag}}"
-      {{- end}}
-      ]
-    },
-    {
-      "type": "selector",
-      "tag": "OPENAI",
-      "interrupt_exist_connections": false,
-      "outbounds": [
-      {{- range $ele := nodeFilter .Outbounds "台湾"}}
-        "{{$ele}}",
-      {{- end}}
-        "自动选择",
-        "节点选择"
-      ]
-    },
-    {
-      "type": "selector",
-      "tag": "MICROSOFT",
-      "interrupt_exist_connections": false,
-      "outbounds": [
-        "直连",
-        "自动选择",
-        "节点选择"
-      ],
-      "default": "直连"
-    },
-    {
-      "type": "direct",
-      "tag": "直连"
-    },
-    {
-      "type": "selector",
-      "tag": "漏网之鱼",
-      "interrupt_exist_connections": false,
-      "outbounds": [ "节点选择", "直连" ],
-      "default": "节点选择"
-    }
-  ],
+  "outbounds": [],
   "route": {
     "rules": [
       { "action": "sniff" },
       {
         "type": "logical",
         "mode": "or",
-        "rules": [ { "protocol": "dns" }, { "port": 53 } ],
+        "rules": [{ "protocol": "dns" }, { "port": 53 }],
         "action": "hijack-dns"
       },
-      { "ip_is_private": true, "outbound": "直连"},
+      { "ip_is_private": true, "outbound": "直连" },
       { "clash_mode": "direct", "outbound": "直连" },
       { "clash_mode": "global", "outbound": "节点选择" },
       { "rule_set": "geosite-openai", "outbound": "OPENAI" },
       { "rule_set": "geosite-github", "outbound": "节点选择" },
       { "rule_set": "geosite-microsoft", "outbound": "MICROSOFT" },
-      {{- range .Rules}}
-      { "rule_set": "{{.RuleSet}}", "outbound": "{{.Outbound}}"},
-      {{- end}}
       { "rule_set": ["geosite-cn", "geoip-cn"], "outbound": "直连" },
       { "rule_set": "geosite-geolocation-!cn", "outbound": "节点选择" }
     ],
@@ -179,25 +120,6 @@
     "auto_detect_interface": true,
     "final": "漏网之鱼",
     "rule_set": [
-      {{- range .InlineRuleSet}}
-      {
-        "type": "inline",
-        "tag": "{{.Tag}}",
-        "rules": [
-          {
-            {{- range $i, $e := .HeadlessRule.Conditions}}
-            {{- if $i}},{{end}}
-            "{{$e.Name}}": [
-            {{- range $idx, $ele := $e.Value}}
-            {{- if $idx}},{{end}}
-              "{{$ele}}"
-            {{- end}}
-            ]
-            {{- end}}
-          }
-        ]
-      },
-      {{- end}}
       {
         "tag": "geosite-cn",
         "type": "remote",

@@ -1,9 +1,13 @@
 package converter_test
 
 import (
+	"fmt"
 	"testing"
 
+	"github.com/follow1123/sing-box-ctl/config"
 	"github.com/follow1123/sing-box-ctl/converter"
+	"github.com/follow1123/sing-box-ctl/settings"
+	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -43,7 +47,7 @@ proxies:
     type: ss
     cipher: chacha20-ietf-poly1305
     password: "123456"
-    
+
   - name: "bbb"
     server: b.com
     port: 12345
@@ -63,21 +67,21 @@ rules:
 - GEOIP,CN,🎯 直连
 - MATCH,🐟 漏网之鱼`)
 
-	sbData, err := converter.Convert(data)
+	conf, err := config.Default()
 	assert.NoError(t, err)
-	assert.Contains(t, string(sbData), `"tag": "aaa"`)
-	assert.Contains(t, string(sbData), `"tag": "bbb"`)
+	sbTmpl, err := settings.LoadConfigFromPath(conf.SingBoxTmplConfigPath())
+	assert.NoError(t, err)
+
+	c := &converter.Clash{}
+	err = yaml.Unmarshal(data, c)
+	assert.NoError(t, err)
+
+	sb, err := converter.Convert(c, sbTmpl)
+	assert.NoError(t, err)
+	fmt.Printf("sb.Outbounds: %v\n", sb.Outbounds)
+	assert.Contains(t, sb.Outbounds[0]["tag"], "aaa")
+	assert.Contains(t, sb.Outbounds[1]["tag"], "bbb")
 }
 
 func TestConvertFailure(t *testing.T) {
-	t.Run("not yaml file", func(t *testing.T) {
-		data := []byte(`
-		{
-			"aaa": 1,
-			"bbb": 2
-		}
-		`)
-		_, err := converter.Convert(data)
-		assert.ErrorContains(t, err, "unmarshal clash config error")
-	})
 }

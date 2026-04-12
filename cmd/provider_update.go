@@ -42,9 +42,7 @@ var providerUpdateCmd = &cobra.Command{
 			}
 		}
 		if providerUpdateFlagSetDefault {
-			if err := provider.SetDefault(name); err != nil {
-				return err
-			}
+			provider.SetDefault(name)
 		}
 		if err := provider.Save(); err != nil {
 			return err

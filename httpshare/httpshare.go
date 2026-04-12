@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/follow1123/sing-box-ctl/config"
-	U "github.com/follow1123/sing-box-ctl/updater"
+	"github.com/follow1123/sing-box-ctl/settings"
 	"github.com/olekukonko/tablewriter"
 )
 
@@ -39,9 +39,10 @@ const (
 const urlPath = "/config"
 
 type HttpShare struct {
-	dataPath string
-	server   *http.Server
-	port     uint16
+	confPath     string
+	tmplConfPath string
+	server       *http.Server
+	port         uint16
 }
 
 func New(port uint16) (*HttpShare, error) {
@@ -50,8 +51,9 @@ func New(port uint16) (*HttpShare, error) {
 		return nil, err
 	}
 	h := &HttpShare{
-		dataPath: conf.SingBoxConfigPath(),
-		port:     port,
+		confPath:     conf.SingBoxConfigPath(),
+		tmplConfPath: conf.SingBoxTmplConfigPath(),
+		port:         port,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(urlPath, h.handle)
@@ -122,94 +124,100 @@ func (h *HttpShare) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	params := r.URL.Query()
-	updater, err := U.New(h.dataPath)
+
+	s, err := settings.NewSettings(h.tmplConfPath, h.confPath)
 	if err != nil {
 		handleInternalServerError(w, err)
-		return
 	}
-	var actions []U.Action
 	// clash_api 相关配置
+	webuiSetting := settings.WebUISettings{Enabled: true}
 	if params.Has(paramWebuiAddr) {
-		act := U.NewWebUIAddressAction()
-		act.SetValue(params.Get(paramWebuiAddr))
-		actions = append(actions, act)
+		weuiAddr := params.Get(paramWebuiAddr)
+		webuiSetting.Addr = &weuiAddr
 	}
 	if params.Has(paramWebuiSecret) {
-		act := U.NewWebUISecretAction()
-		act.SetValue(strings.TrimSpace(params.Get(paramWebuiSecret)))
-		actions = append(actions, act)
+		webuiSecret := strings.TrimSpace(params.Get(paramWebuiSecret))
+		webuiSetting.Password = &webuiSecret
 	}
 	if params.Has(paramResetWebui) {
-		act := U.NewWebUIStatusAction()
-		act.SetValue(true)
-		actions = append(actions, act)
+		webuiSetting.Reset = true
 	}
 	if params.Has(paramDisableWebui) {
-		act := U.NewWebUIStatusAction()
-		act.SetValue(false)
-		actions = append(actions, act)
+		webuiSetting.Enabled = false
 	}
+	s.UpdateWebUISettings(webuiSetting)
+
 	// inbound 模式相关配置
+	mixedProxySettings := settings.MixedProxySettings{Enabled: true}
 	if params.Has(paramMixedPort) {
 		mixedPort, err := strconv.ParseInt(params.Get(paramMixedPort), 10, 16)
 		if err != nil {
 			handleBadRequestError(w, paramMixedPort, err)
 			return
 		}
-		act := U.NewMixedPortAction()
-		act.SetValue(mixedPort)
-		actions = append(actions, act)
+		mp := uint16(mixedPort)
+		mixedProxySettings.Port = &mp
 	}
 	if params.Has(paramMixedEnableSystemProxy) {
-		act := U.NewMixedSysProxyAction()
-		act.SetValue(true)
-		actions = append(actions, act)
+		var enable = true
+		mixedProxySettings.EnableSystemProxy = &enable
 	}
 	if params.Has(paramMixedDisableSystemProxy) {
-		act := U.NewMixedSysProxyAction()
-		act.SetValue(false)
-		actions = append(actions, act)
+		var enable = false
+		mixedProxySettings.EnableSystemProxy = &enable
 	}
 	if params.Has(paramMixedAllowLAN) {
-		act := U.NewMixedAllowLANAction()
-		act.SetValue(true)
-		actions = append(actions, act)
+		var enable = true
+		mixedProxySettings.AllowLAN = &enable
 	}
 	if params.Has(paramMixedDenyLAN) {
-		act := U.NewMixedAllowLANAction()
-		act.SetValue(false)
-		actions = append(actions, act)
+		var enable = false
+		mixedProxySettings.AllowLAN = &enable
 	}
 	if params.Has(paramMixedMode) {
-		actions = append(actions, U.NewMixedModeAction())
+		mixedProxySettings.Reset = true
 	}
-	if params.Has(paramTunMode) {
-		actions = append(actions, U.NewTunModeAction())
-	}
-	if params.Has(paramWindows) {
-		act := U.NewPlatformAction()
-		act.SetValue(U.PlatformWindows)
-		actions = append(actions, act)
-	}
-	if params.Has(paramLinux) {
-		act := U.NewPlatformAction()
-		act.SetValue(U.PlatformLinux)
-		actions = append(actions, act)
-	}
-	if params.Has(paramAndroid) {
-		act := U.NewPlatformAction()
-		act.SetValue(U.PlatformAndroid)
-		actions = append(actions, act)
-		actions = append(actions, U.NewTunModeAction())
-	}
-	// 修改配置
-	if err := updater.Update(actions, params.Has(paramFormat)); err != nil {
+	if err := s.UpdateMixedProxySettings(mixedProxySettings); err != nil {
 		handleInternalServerError(w, err)
 		return
 	}
+
+	if params.Has(paramTunMode) {
+		s.UpdateTunSettings(true)
+	}
+	if params.Has(paramWindows) {
+		if err := s.UpdatePlatformSettings(settings.PlatformWindows); err != nil {
+			handleInternalServerError(w, err)
+			return
+		}
+
+	}
+	if params.Has(paramLinux) {
+		if err := s.UpdatePlatformSettings(settings.PlatformLinux); err != nil {
+			handleInternalServerError(w, err)
+			return
+		}
+
+	}
+	if params.Has(paramAndroid) {
+		fmt.Printf("\"use android\": %v\n", "use android")
+		s.UpdateTunSettings(true)
+		if err := s.UpdatePlatformSettings(settings.PlatformAndroid); err != nil {
+			handleInternalServerError(w, err)
+			return
+		}
+
+	}
+	// 获取json数据
+	data, err := s.ToJson(params.Has(paramFormat))
+	if err != nil {
+		handleInternalServerError(w, err)
+		return
+	}
+
 	// 写出配置
 	w.WriteHeader(http.StatusOK)
-	if _, err = w.Write(updater.Data()); err != nil {
+	if _, err = w.Write(data); err != nil {
 		handleInternalServerError(w, err)
 		return
 	}

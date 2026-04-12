@@ -6,10 +6,10 @@ import (
 	"net"
 
 	"github.com/follow1123/sing-box-ctl/config"
-	"github.com/follow1123/sing-box-ctl/jsonhandler"
 	"github.com/follow1123/sing-box-ctl/platform"
 	"github.com/follow1123/sing-box-ctl/service"
-	U "github.com/follow1123/sing-box-ctl/updater"
+	"github.com/follow1123/sing-box-ctl/settings"
+
 	"github.com/spf13/cobra"
 )
 
@@ -31,19 +31,16 @@ var webuiCmd = &cobra.Command{
 		if !serv.IsRunning() {
 			return errors.New("service is not running")
 		}
-		jh, err := jsonhandler.FromFile(conf.SingBoxConfigPath())
+
+		sb, err := settings.LoadConfigFromPath(conf.SingBoxConfigPath())
 		if err != nil {
 			return err
 		}
-		webUIStatusAct := U.NewWebUIStatusAction()
-		if !webUIStatusAct.IsEnabled(jh) {
+
+		if sb.Experimental.ClashAPI == nil {
 			return errors.New("web ui is not enabled")
 		}
-		webUIAddrAct := U.NewWebUIAddressAction()
-		addr, err := webUIAddrAct.GetAddress(jh)
-		if err != nil {
-			return err
-		}
+		addr := sb.Experimental.ClashAPI.ExternalController
 		_, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			return fmt.Errorf("invalid address '%s'\n\t%w", addr, err)

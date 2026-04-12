@@ -1,11 +1,9 @@
 package cmd
 
 import (
-	"strings"
-
 	"github.com/follow1123/sing-box-ctl/config"
 	"github.com/follow1123/sing-box-ctl/service"
-	U "github.com/follow1123/sing-box-ctl/updater"
+	"github.com/follow1123/sing-box-ctl/settings"
 	"github.com/spf13/cobra"
 )
 
@@ -39,75 +37,60 @@ var updateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		// 初始化 updater
-		updater, err := U.New(conf.SingBoxConfigPath())
+		s, err := settings.NewSettings(conf.SingBoxTmplConfigPath(), conf.SingBoxConfigPath())
 		if err != nil {
 			return err
 		}
-		var actions []U.Action
 		// clash_api 相关配置
+		webuiSetting := settings.WebUISettings{Enabled: true}
 		if cmd.Flags().Changed("webui-addr") {
-			act := U.NewWebUIAddressAction()
-			act.SetValue(updateFlagWebuiAddr)
-			actions = append(actions, act)
+			webuiSetting.Addr = &updateFlagWebuiAddr
 		}
 		if cmd.Flags().Changed("webui-secret") {
-			act := U.NewWebUISecretAction()
-			act.SetValue(strings.TrimSpace(updateFlagWebuiSecret))
-			actions = append(actions, act)
+			webuiSetting.Password = &updateFlagWebuiSecret
 		}
 		if updateFlagResetWebui {
-			act := U.NewWebUIStatusAction()
-			act.SetValue(true)
-			actions = append(actions, act)
+			webuiSetting.Reset = true
 		}
 		if updateFlagDisableWebui {
-			act := U.NewWebUIStatusAction()
-			act.SetValue(false)
-			actions = append(actions, act)
+			webuiSetting.Enabled = false
 		}
+		s.UpdateWebUISettings(webuiSetting)
+
 		// inbound 模式相关配置
+		mixedProxySettings := settings.MixedProxySettings{Enabled: true}
 		if updateFlagMixedPort != 0 {
-			act := U.NewMixedPortAction()
-			act.SetValue(updateFlagMixedPort)
-			actions = append(actions, act)
+			mixedProxySettings.Port = &updateFlagMixedPort
 		}
 		if updateFlagMixedEnableSystemProxy {
-			act := U.NewMixedSysProxyAction()
-			act.SetValue(true)
-			actions = append(actions, act)
+			mixedProxySettings.EnableSystemProxy = &updateFlagMixedEnableSystemProxy
 		}
 		if updateFlagMixedDisableSystemProxy {
-			act := U.NewMixedSysProxyAction()
-			act.SetValue(false)
-			actions = append(actions, act)
+			updateFlagMixedDisableSystemProxy = !updateFlagMixedDisableSystemProxy
+			mixedProxySettings.EnableSystemProxy = &updateFlagMixedEnableSystemProxy
 		}
 		if updateFlagMixedAllowLAN {
-			act := U.NewMixedAllowLANAction()
-			act.SetValue(true)
-			actions = append(actions, act)
+			mixedProxySettings.AllowLAN = &updateFlagMixedAllowLAN
 		}
 		if updateFlagMixedDenyLAN {
-			act := U.NewMixedAllowLANAction()
-			act.SetValue(false)
-			actions = append(actions, act)
+			updateFlagMixedDenyLAN = !updateFlagMixedDenyLAN
+			mixedProxySettings.AllowLAN = &updateFlagMixedAllowLAN
 		}
 		if updateFlagMixedMode {
-			actions = append(actions, U.NewMixedModeAction())
+			mixedProxySettings.Reset = true
 		}
-		if updateFlagTunMode {
-			actions = append(actions, U.NewTunModeAction())
-		}
-		// 修改配置
-		if err := updater.Update(actions, updateFlagFormat); err != nil {
+		if err := s.UpdateMixedProxySettings(mixedProxySettings); err != nil {
 			return err
 		}
-		isModified := updater.IsModified()
-		if isModified {
-			if err := updater.Save(); err != nil {
-				return err
-			}
+
+		if updateFlagTunMode {
+			s.UpdateTunSettings(true)
 		}
+		// 修改配置
+		if err := s.Save(updateFlagFormat); err != nil {
+			return err
+		}
+
 		// 重启服务
 		if updateFlagRestart {
 			serv, err := service.New(conf.SingBoxBinaryPath(), conf.SingBoxConfigPath(), conf.SingBoxWorkingDir())
@@ -115,7 +98,7 @@ var updateCmd = &cobra.Command{
 				return err
 			}
 			// 服务已启动，配置未修改，直接退出
-			if serv.IsRunning() && !isModified {
+			if serv.IsRunning() {
 				return nil
 			}
 			if err := serv.Restart(); err != nil {

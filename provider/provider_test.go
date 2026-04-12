@@ -23,10 +23,8 @@ func TestAdd(t *testing.T) {
 		p, err := provider.New(conf.ConfigPath())
 		require.NoError(t, err)
 		require.NoError(t, p.Add("aaa", "http://localhost:8752"))
-		pd, err := p.Get("aaa")
-		require.NoError(t, err)
-		defaultProvider, err := p.GetDefault()
-		require.NoError(t, err)
+		pd := p.Get("aaa")
+		defaultProvider := p.GetDefault()
 		require.Equal(t, pd.Name, defaultProvider.Name)
 	})
 	t.Run("added later is not the default", func(t *testing.T) {
@@ -36,9 +34,8 @@ func TestAdd(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, p.Add("aaa", "http://localhost:8752"))
 		require.NoError(t, p.Add("bbb", "http://localhost:8754"))
-		pd, err := p.Get("bbb")
-		require.NoError(t, err)
-		defaultProvider, err := p.GetDefault()
+		pd := p.Get("bbb")
+		defaultProvider := p.GetDefault()
 		require.NotEqual(t, pd.Name, defaultProvider.Name)
 	})
 
@@ -58,13 +55,11 @@ func TestSetDefault(t *testing.T) {
 	p, err := provider.New(conf.ConfigPath())
 	require.NoError(t, err)
 	require.NoError(t, p.Add("aaa", "http://localhost:8752"))
-	defProvider, err := p.GetDefault()
-	require.NoError(t, err)
+	defProvider := p.GetDefault()
 	require.Equal(t, "aaa", defProvider.Name)
 	require.NoError(t, p.Add("bbb", "http://localhost:8754"))
-	require.NoError(t, p.SetDefault("bbb"))
-	defProvider, err = p.GetDefault()
-	require.NoError(t, err)
+	p.SetDefault("bbb")
+	defProvider = p.GetDefault()
 	require.Equal(t, "bbb", defProvider.Name)
 }
 
@@ -79,7 +74,7 @@ func TestDelete(t *testing.T) {
 		require.NoError(t, p.Add("ccc", "http://localhost:8754"))
 		require.NoError(t, p.Add("ddd", "http://localhost:8755"))
 		require.NoError(t, p.Delete("ccc"))
-		pds, err := p.List()
+		pds := p.List()
 		require.NoError(t, err)
 		require.Equal(t, "aaa", pds[0].Name)
 		require.Equal(t, "bbb", pds[1].Name)
@@ -95,8 +90,7 @@ func TestDelete(t *testing.T) {
 		require.NoError(t, p.Add("ccc", "http://localhost:8754"))
 		require.NoError(t, p.Add("ddd", "http://localhost:8755"))
 		require.NoError(t, p.Delete("aaa"))
-		defProvider, err := p.GetDefault()
-		require.NoError(t, err)
+		defProvider := p.GetDefault()
 		require.Equal(t, "bbb", defProvider.Name)
 	})
 	t.Run("delete last if is default", func(t *testing.T) {
@@ -108,10 +102,9 @@ func TestDelete(t *testing.T) {
 		require.NoError(t, p.Add("bbb", "http://localhost:8753"))
 		require.NoError(t, p.Add("ccc", "http://localhost:8754"))
 		require.NoError(t, p.Add("ddd", "http://localhost:8755"))
-		require.NoError(t, p.SetDefault("ddd"))
+		p.SetDefault("ddd")
 		require.NoError(t, p.Delete("ddd"))
-		defProvider, err := p.GetDefault()
-		require.NoError(t, err)
+		defProvider := p.GetDefault()
 		require.Equal(t, "ccc", defProvider.Name)
 	})
 	t.Run("delete last one if is default", func(t *testing.T) {
@@ -122,8 +115,7 @@ func TestDelete(t *testing.T) {
 		require.NoError(t, p.Add("aaa", "http://localhost:8752"))
 		name := "aaa"
 		require.NoError(t, p.Delete(name))
-		_, err = p.Get(name)
-		require.ErrorContains(t, err, "not exists")
+		require.Nil(t, p.Get(name))
 	})
 }
 
@@ -139,8 +131,7 @@ func TestUpdate(t *testing.T) {
 		newUrl := "http://localhost:8752"
 		err = p.Update(name, newUrl)
 		require.NoError(t, err)
-		data, err := p.Get(name)
-		require.NoError(t, err)
+		data := p.Get(name)
 		require.Equal(t, newUrl, data.Url)
 	})
 	t.Run("no providers", func(t *testing.T) {
@@ -149,7 +140,7 @@ func TestUpdate(t *testing.T) {
 		p, err := provider.New(conf.ConfigPath())
 		require.NoError(t, err)
 		err = p.Update("aaa", "http://localhost:8752")
-		require.ErrorContains(t, err, "no providers")
+		require.ErrorContains(t, err, "no provider")
 	})
 }
 
@@ -161,8 +152,7 @@ func TestGet(t *testing.T) {
 		require.NoError(t, err)
 		p, err := provider.New(conf.ConfigPath())
 		require.NoError(t, err)
-		data, err := p.Get("aaa")
-		require.NoError(t, err)
+		data := p.Get("aaa")
 		require.Equal(t, "aaa", data.Name)
 		require.Equal(t, "http://localhost:8903", data.Url)
 	})
@@ -171,8 +161,7 @@ func TestGet(t *testing.T) {
 		require.NoError(t, err)
 		p, err := provider.New(conf.ConfigPath())
 		require.NoError(t, err)
-		_, err = p.Get("aaa")
-		require.ErrorContains(t, err, "no providers")
+		require.Nil(t, p.Get("aaa"))
 	})
 }
 
@@ -185,8 +174,7 @@ func TestList(t *testing.T) {
 	require.NoError(t, p.Add("bbb", "http://localhost:8753"))
 	require.NoError(t, p.Add("ccc", "http://localhost:8754"))
 	require.NoError(t, p.Add("ddd", "http://localhost:8755"))
-	pds, err := p.List()
-	require.NoError(t, err)
+	pds := p.List()
 	require.Equal(t, "aaa", pds[0].Name)
 	require.Equal(t, "bbb", pds[1].Name)
 	require.Equal(t, "ccc", pds[2].Name)

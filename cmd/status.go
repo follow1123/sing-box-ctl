@@ -1,14 +1,12 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
 	"github.com/follow1123/sing-box-ctl/config"
-	"github.com/follow1123/sing-box-ctl/jsonhandler"
 	"github.com/follow1123/sing-box-ctl/service"
-	U "github.com/follow1123/sing-box-ctl/updater"
+	"github.com/follow1123/sing-box-ctl/settings"
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 )
@@ -28,27 +26,19 @@ var statusCmd = &cobra.Command{
 			return err
 		}
 
+		sb, err := settings.LoadConfigFromPath(conf.SingBoxConfigPath())
+
 		table := tablewriter.NewTable(os.Stdout, tablewriter.WithEastAsian(false))
-		jh, err := jsonhandler.FromFile(conf.SingBoxConfigPath())
-		if err != nil {
-			return err
-		}
 		tableData := [][]string{
 			{"Status", status(serv.IsRunning())},
 		}
-		webUIStatusAct := U.NewWebUIStatusAction()
-		if webUIStatusAct.IsEnabled(jh) {
-			webUIAddrAct := U.NewWebUIAddressAction()
-			addr, err := webUIAddrAct.GetAddress(jh)
-			if err != nil {
-				return err
-			}
-			tableData = append(tableData, []string{"WebUI Address", addr})
-			webUISecretAct := U.NewWebUISecretAction()
-			secret, err := webUISecretAct.GetSecret(jh)
-			if err != nil {
-				return err
-			}
+
+		if err != nil {
+			return err
+		}
+		if sb.Experimental.ClashAPI != nil {
+			tableData = append(tableData, []string{"WebUI Address", sb.Experimental.ClashAPI.ExternalController})
+			secret := sb.Experimental.ClashAPI.Secret
 			if secret == "" {
 				secret = "<not set>"
 			}
@@ -57,36 +47,18 @@ var statusCmd = &cobra.Command{
 			tableData = append(tableData, []string{"WebUI", switchStr(false)})
 		}
 
-		inboundType, exists := jh.GetString("inbounds.0.type")
-		if !exists {
-			return errors.New("no inbound or no inbound type")
+		for _, inbound := range sb.Inbounds {
+			if inbound["type"] == "mixed" {
+				tableData = append(tableData, []string{"Mode", "mixed"})
+				tableData = append(tableData, []string{"Mixed Port", fmt.Sprintf("%v", inbound["listen_port"])})
+				tableData = append(tableData, []string{"Mixed System Proxy", switchStr(inbound["set_system_proxy"].(bool))})
+			}
+			if inbound["type"] == "tun" {
+				tableData = append(tableData, []string{"Mode", "tun"})
+			}
+
 		}
-		switch inboundType {
-		case "mixed":
-			tableData = append(tableData, []string{"Mode", "mixed"})
-			mixedPortAct := U.NewMixedPortAction()
-			port, err := mixedPortAct.GetPort(jh)
-			if err != nil {
-				return err
-			}
-			tableData = append(tableData, []string{"Mixed Port", fmt.Sprintf("%d", port)})
-			mixedSysProxyAct := U.NewMixedSysProxyAction()
-			isSysProxyEnabled, err := mixedSysProxyAct.IsSysProxyEnabled(jh)
-			if err != nil {
-				return err
-			}
-			tableData = append(tableData, []string{"Mixed System Proxy", switchStr(isSysProxyEnabled)})
-			mixedAllowLANAct := U.NewMixedAllowLANAction()
-			isAllowLAN, err := mixedAllowLANAct.IsAllowLAN(jh)
-			if err != nil {
-				return err
-			}
-			tableData = append(tableData, []string{"Mixed Allow LAN", switchStr(isAllowLAN)})
-		case "tun":
-			tableData = append(tableData, []string{"Mode", "tun"})
-		default:
-			return fmt.Errorf("unsupported inbound type '%s'", inboundType)
-		}
+
 		if err := table.Bulk(tableData); err != nil {
 			return err
 		}
