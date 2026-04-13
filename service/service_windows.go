@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	_ "embed"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -14,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/follow1123/sing-box-ctl/jsonhandler"
+	"github.com/follow1123/sing-box-ctl/settings"
 )
 
 type service struct {
@@ -189,15 +188,13 @@ func (s *service) stop(pid string, admin bool, force bool) error {
 }
 
 func (s *service) isTunMode() (bool, error) {
-	jh, err := jsonhandler.FromFile(s.configPath)
+	sb, err := settings.LoadConfigFromPath(s.configPath)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("check is tun mode error:\n\t%w", err)
 	}
-	inboundType, exists := jh.GetString("inbounds.0.type")
-	if !exists {
-		return false, errors.New("no inbound or no inbound type")
-	}
-	return inboundType == "tun", nil
+	idx := settings.IndexOfInboundType(sb, "tun")
+
+	return idx >= 0, nil
 }
 
 func (s *service) turnOffSystemProxy() error {

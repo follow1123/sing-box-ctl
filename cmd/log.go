@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 
 	"github.com/follow1123/sing-box-ctl/config"
-	"github.com/follow1123/sing-box-ctl/jsonhandler"
 	"github.com/follow1123/sing-box-ctl/platform"
+	"github.com/follow1123/sing-box-ctl/settings"
 	"github.com/spf13/cobra"
 )
 
@@ -21,15 +21,20 @@ var logCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		jh, err := jsonhandler.FromFile(conf.SingBoxConfigPath())
+		sb, err := settings.LoadConfigFromPath(conf.SingBoxConfigPath())
 		if err != nil {
-			return err
+			return fmt.Errorf("load config check log path error:\n\t%w", err)
 		}
-		logName, exists := jh.GetString("log.output")
-		if !exists {
+
+		if sb.Log == nil {
+			return fmt.Errorf("no log config")
+		}
+
+		if sb.Log.Output == "" {
 			return fmt.Errorf("no log file")
 		}
-		logFile := filepath.Join(conf.SingBoxWorkingDir(), logName)
+
+		logFile := filepath.Join(conf.SingBoxWorkingDir(), sb.Log.Output)
 		fmt.Printf("sing-box log file: %s\n\n", logFile)
 		if err := platform.LogFile(logFile); err != nil {
 			return err
