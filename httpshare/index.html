@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Config Panel</title>
+    <style>
+      /* 全局样式 */
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      }
+
+      body {
+        background-color: #f5f5f5;
+        color: #333;
+        line-height: 1.5;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 600px;
+        margin: 0 auto;
+        background-color: #fff;
+        padding: 25px;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      }
+
+      h1 {
+        text-align: center;
+        margin-bottom: 30px;
+        color: #007bff;
+      }
+
+      .field {
+        display: flex;
+        flex-direction: column;
+        margin-bottom: 20px;
+      }
+
+      .field-title {
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+
+      input[type="text"],
+      select {
+        padding: 10px 12px;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        font-size: 16px;
+        transition:
+          border-color 0.3s,
+          box-shadow 0.3s;
+      }
+
+      input[type="text"]:focus,
+      select:focus {
+        border-color: #007bff;
+        box-shadow: 0 0 5px rgba(0, 123, 255, 0.3);
+        outline: none;
+      }
+
+      button {
+        padding: 12px 20px;
+        font-size: 16px;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        transition:
+          background-color 0.3s,
+          transform 0.2s;
+        margin-right: 10px;
+        margin-top: 10px;
+      }
+
+      button:hover {
+        transform: translateY(-2px);
+      }
+
+      button:first-of-type {
+        background-color: #28a745;
+        color: #fff;
+      }
+
+      button:first-of-type:hover {
+        background-color: #218838;
+      }
+
+      button:last-of-type {
+        background-color: #007bff;
+        color: #fff;
+      }
+
+      button:last-of-type:hover {
+        background-color: #0069d9;
+      }
+
+      /* 响应式布局 */
+      @media (max-width: 600px) {
+        body {
+          padding: 10px;
+          background-color: #fff; /* 移动端去掉灰色背景 */
+        }
+
+        .container {
+          max-width: 100%;
+          margin: 0;
+          padding: 15px;
+          border-radius: 0;
+          box-shadow: none; /* 去掉卡片阴影 */
+          background-color: transparent; /* 去掉白色背景 */
+        }
+
+        button {
+          width: 100%;
+          margin-right: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>配置</h1>
+
+      <div class="field">
+        <div class="field-title">Platform：</div>
+        <select id="platform">
+          <option value="windows">Windows</option>
+          <option value="linux">Linux</option>
+          <option value="android">Android</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <div class="field-title">Webui Status：</div>
+        <select id="webui_status">
+          <option value="true">Enable</option>
+          <option value="false">Disable</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <div class="field-title">Webui Port：</div>
+        <input id="webui_port" type="text" name="webui_port" />
+      </div>
+
+      <div class="field">
+        <div class="field-title">Webui Secret：</div>
+        <input id="webui_secret" type="text" name="webui_secret" />
+      </div>
+
+      <div class="field">
+        <div class="field-title">Mixed mode：</div>
+        <select id="mixed_status">
+          <option value="true">Enable</option>
+          <option value="false">Disable</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <div class="field-title">Mixed Port：</div>
+        <input id="mixed_port" type="text" name="mixed_port" />
+      </div>
+
+      <div class="field">
+        <div class="field-title">Mixed System Proxy：</div>
+        <select id="mixed_system_proxy_status">
+          <option value="true">Enable</option>
+          <option value="false">Disable</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <div class="field-title">Mixed Proxy Sharing：</div>
+        <select id="mixed_share_status">
+          <option value="true">Enable</option>
+          <option value="false">Disable</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <div class="field-title">Tun Mode：</div>
+        <select id="tun_status">
+          <option value="true">Enable</option>
+          <option value="false">Disable</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <div class="field-title">Format：</div>
+        <select id="format">
+          <option value="true">True</option>
+          <option value="false">False</option>
+        </select>
+      </div>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 10px">
+        <button id="copyBtn">Copy URL</button>
+        <button id="openBtn">Open</button>
+      </div>
+    </div>
+
+    <script>
+      const data = JSON.parse(`{{.}}`);
+      const platformSelect = document.querySelector("#platform");
+
+      const webuiStatusSelect = document.querySelector("#webui_status");
+      const webuiPortInput = document.querySelector("#webui_port");
+      const webuiSecretInput = document.querySelector("#webui_secret");
+
+      const mixedStatusSelect = document.querySelector("#mixed_status");
+      const mixedPortInput = document.querySelector("#mixed_port");
+      const mixedSystemProxyStatusSelect = document.querySelector(
+        "#mixed_system_proxy_status",
+      );
+      const mixedProxySharingSelect = document.querySelector(
+        "#mixed_share_status",
+      );
+      const host = `http://${data.ip}:${data.port}/config`;
+
+      const tunStatusSelect = document.querySelector("#tun_status");
+      const formatSelect = document.querySelector("#format");
+
+      if (data.platform) platformSelect.value = data.platform;
+      if (data.webui_status !== undefined)
+        webuiStatusSelect.value = String(data.webui_status);
+      if (data.webui_port) webuiPortInput.value = data.webui_port;
+      if (data.webui_secret) webuiSecretInput.value = data.webui_secret;
+      if (data.mixed_status !== undefined)
+        mixedStatusSelect.value = String(data.mixed_status);
+      if (data.mixed_port) mixedPortInput.value = data.mixed_port;
+      if (data.mixed_system_proxy_status !== undefined)
+        mixedSystemProxyStatusSelect.value = String(
+          data.mixed_system_proxy_status,
+        );
+      if (data.mixed_share_status !== undefined)
+        mixedProxySharingSelect.value = String(data.mixed_share_status);
+      if (data.tun_status !== undefined)
+        tunStatusSelect.value = String(data.tun_status);
+
+      formatSelect.value = "false";
+
+      function buildUrl() {
+        const params = [];
+        // 遍历页面所有 select 元素
+        document.querySelectorAll("select").forEach((sel) => {
+          params.push(
+            `${encodeURIComponent(sel.id)}=${encodeURIComponent(sel.value)}`,
+          );
+        });
+        return `${host}?${params.join("&")}`;
+      }
+      document.querySelector("#copyBtn").addEventListener("click", () => {
+        const url = buildUrl();
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          // 现代浏览器
+          navigator.clipboard
+            .writeText(url)
+            .then(() => alert("URL 已复制到剪贴板"))
+            .catch(() => fallbackCopy(url));
+        } else {
+          // 回退方法
+          fallbackCopy(url);
+        }
+      });
+
+      // 临时 textarea 方案
+      function fallbackCopy(text) {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          document.execCommand("copy");
+          alert("URL 已复制到剪贴板");
+        } catch (err) {
+          alert("复制失败，请手动复制");
+          console.error(err);
+        }
+        document.body.removeChild(ta);
+      }
+      document.querySelector("#openBtn").addEventListener("click", () => {
+        const url = buildUrl();
+        window.open(url, "_blank"); // 新窗口打开
+      });
+
+      function toggleField(selectEl, fieldsToToggle) {
+        const show = selectEl.value === "true"; // Enable 显示，Disable 隐藏
+        fieldsToToggle.forEach((el) => {
+          el.style.display = show ? "flex" : "none";
+        });
+      }
+      const webuiFields = [
+        webuiPortInput.closest(".field"),
+        webuiSecretInput.closest(".field"),
+      ];
+      toggleField(webuiStatusSelect, webuiFields);
+
+      webuiStatusSelect.addEventListener("change", () => {
+        toggleField(webuiStatusSelect, webuiFields);
+      });
+      const mixedFields = [
+        mixedPortInput.closest(".field"),
+        mixedSystemProxyStatusSelect.closest(".field"),
+        mixedProxySharingSelect.closest(".field"),
+      ];
+      toggleField(mixedStatusSelect, mixedFields);
+
+      mixedStatusSelect.addEventListener("change", () => {
+        toggleField(mixedStatusSelect, mixedFields);
+      });
+    </script>
+  </body>
+</html>

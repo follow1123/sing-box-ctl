@@ -19,21 +19,17 @@ type Provider struct {
 
 func New(path string) (*Provider, error) {
 	config := &SingBoxCtlConfig{}
-	data, err := os.ReadFile(path)
-	var notExists bool
-	if err != nil {
-		if os.IsNotExist(err) {
-			notExists = true
-		} else {
-			return nil, fmt.Errorf("check provider config '%s' error:\n\t%w", path, err)
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read provider config %s error:\n\t%w", path, err)
 		}
-	}
-	if !notExists {
 		if err := json.Unmarshal(data, config); err != nil {
 			return nil, fmt.Errorf("unmarshal json error:\n\t%w", err)
 		}
-
 	}
+
 	return &Provider{
 		path:   path,
 		config: config,

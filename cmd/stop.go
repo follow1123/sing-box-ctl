@@ -3,6 +3,7 @@ package cmd
 import (
 	"github.com/follow1123/sing-box-ctl/config"
 	"github.com/follow1123/sing-box-ctl/service"
+	"github.com/follow1123/sing-box-ctl/settings"
 	"github.com/spf13/cobra"
 )
 
@@ -16,10 +17,12 @@ var stopCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		serv, err := service.New(conf.SingBoxBinaryPath(), conf.SingBoxConfigPath(), conf.SingBoxWorkingDir())
+		sts, err := settings.NewSettings(conf.SingBox.ConfigFile)
 		if err != nil {
 			return err
 		}
+
+		serv := service.New(conf, sts)
 		if err := serv.Stop(); err != nil {
 			return err
 		}

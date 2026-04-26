@@ -2,12 +2,11 @@ package cmd
 
 import (
 	"fmt"
-	"os"
+	"path/filepath"
 
 	"github.com/follow1123/sing-box-ctl/config"
 	"github.com/follow1123/sing-box-ctl/service"
-	"github.com/follow1123/sing-box-ctl/settings"
-	"github.com/olekukonko/tablewriter"
+	S "github.com/follow1123/sing-box-ctl/settings"
 	"github.com/spf13/cobra"
 )
 
@@ -21,49 +20,73 @@ var statusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		serv, err := service.New(conf.SingBoxBinaryPath(), conf.SingBoxConfigPath(), conf.SingBoxWorkingDir())
+		s, err := S.NewSettings(conf.SingBox.ConfigFile)
+		if err != nil {
+			return err
+		}
+		serv := service.New(conf, s)
+
+		cmd.Printf("Status: %s\n", status(serv.IsRunning()))
+
+		webuiStatus, err := s.GetBool(S.StWebuiStatus)
 		if err != nil {
 			return err
 		}
 
-		sb, err := settings.LoadConfigFromPath(conf.SingBoxConfigPath())
-
-		table := tablewriter.NewTable(os.Stdout, tablewriter.WithEastAsian(false))
-		tableData := [][]string{
-			{"Status", status(serv.IsRunning())},
-		}
-
-		if err != nil {
-			return err
-		}
-		if sb.Experimental.ClashAPI != nil {
-			tableData = append(tableData, []string{"WebUI Address", sb.Experimental.ClashAPI.ExternalController})
-			secret := sb.Experimental.ClashAPI.Secret
-			if secret == "" {
-				secret = "<not set>"
+		if webuiStatus {
+			port, err := s.GetUint16(S.StWebuiPort)
+			if err != nil {
+				return err
 			}
-			tableData = append(tableData, []string{"WebUI Secret", secret})
+
+			cmd.Printf("WebUI Address: %s\n", fmt.Sprintf("http://127.0.0.1:%d", port))
+
+			secret, err := s.GetString(S.StWebuiSecret)
+			if err != nil {
+				return err
+			}
+
+			if secret != "" {
+				cmd.Printf("WebUI Secret: %s\n", secret)
+			}
 		} else {
-			tableData = append(tableData, []string{"WebUI", switchStr(false)})
+			cmd.Printf("WebUI: %s\n", switchStr(false))
 		}
 
-		for _, inbound := range sb.Inbounds {
-			if inbound["type"] == "mixed" {
-				tableData = append(tableData, []string{"Mode", "mixed"})
-				tableData = append(tableData, []string{"Mixed Port", fmt.Sprintf("%v", inbound["listen_port"])})
-				tableData = append(tableData, []string{"Mixed System Proxy", switchStr(inbound["set_system_proxy"].(bool))})
-			}
-			if inbound["type"] == "tun" {
-				tableData = append(tableData, []string{"Mode", "tun"})
-			}
-
-		}
-
-		if err := table.Bulk(tableData); err != nil {
+		mixedStatus, err := s.GetBool(S.StMixedStatus)
+		if err != nil {
 			return err
 		}
-		if err := table.Render(); err != nil {
+		if mixedStatus {
+			cmd.Printf("Mode: mixed\n")
+			port, err := s.GetUint16(S.StMixedPort)
+			if err != nil {
+				return err
+			}
+			cmd.Printf("\tMixed Port: %d\n", port)
+			sysProxyStatus, err := s.GetBool(S.StMixedSysProxyStatus)
+			if err != nil {
+				return err
+			}
+			cmd.Printf("\tMixed System Proxy: %s\n", switchStr(sysProxyStatus))
+			proxySharingStatus, err := s.GetBool(S.StMixedShareStatus)
+			if err != nil {
+				return err
+			}
+			cmd.Printf("\tMixed Proxy Sharing: %s\n", switchStr(proxySharingStatus))
+		}
+
+		tunStatus, err := s.GetBool(S.StTunStatus)
+		if err != nil {
 			return err
+		}
+		if tunStatus {
+			cmd.Printf("Mode: tun\n")
+		}
+
+		if s.GetConfig().Log != nil && s.GetConfig().Log.Output != "" {
+			logFile := filepath.Join(conf.SingBox.WorkingDir, s.GetConfig().Log.Output)
+			cmd.Printf("Log File: %s\n", logFile)
 		}
 
 		return nil

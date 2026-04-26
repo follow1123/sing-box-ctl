@@ -9,14 +9,12 @@ import (
 	"time"
 
 	"github.com/follow1123/sing-box-ctl/httpshare"
-	"github.com/follow1123/sing-box-ctl/platform"
 	"github.com/spf13/cobra"
 )
 
 const defaultPort uint16 = 45728
 
 var (
-	shareFlagOpen bool
 	shareFlagPort uint16
 )
 
@@ -30,9 +28,6 @@ var shareCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if err := s.PrintHelp(); err != nil {
-			return err
-		}
 
 		go func() {
 			log.Printf("start share server on %s ...\n", s.Url())
@@ -40,10 +35,6 @@ var shareCmd = &cobra.Command{
 				log.Fatal(err)
 			}
 		}()
-
-		if shareFlagOpen {
-			platform.OpenUrl(s.Url())
-		}
 
 		quit := make(chan os.Signal, 1)
 		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -63,7 +54,6 @@ var shareCmd = &cobra.Command{
 }
 
 func init() {
-	shareCmd.Flags().BoolVarP(&shareFlagOpen, "open", "o", false, "open with default browser")
 	shareCmd.Flags().Uint16VarP(&shareFlagPort, "port", "p", defaultPort, "port")
 	rootCmd.AddCommand(shareCmd)
 }

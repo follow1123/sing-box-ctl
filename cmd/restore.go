@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,7 +10,6 @@ import (
 	"github.com/follow1123/sing-box-ctl/converter"
 	"github.com/follow1123/sing-box-ctl/service"
 	"github.com/follow1123/sing-box-ctl/settings"
-	"github.com/goccy/go-yaml"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +29,7 @@ var restoreCmd = &cobra.Command{
 			return err
 		}
 		// 获取最新的归档配置
-		archiver, err := archiver.New(conf.ArchiveDir())
+		archiver, err := archiver.New(conf.ArchiveDir)
 		if err != nil {
 			return err
 		}
@@ -43,69 +41,37 @@ var restoreCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("read latest archive '%s' error:\n\t%w", latestArchive, err)
 		}
-		// 转换成 sing-box 配置
-		c := &converter.Clash{}
-		if err := yaml.Unmarshal(data, c); err != nil {
-			return fmt.Errorf("unmarshal clash yaml config error:\n\t%w", err)
-		}
 
-		// 转换成 sing-box 配置
-		tmplConf, err := settings.LoadConfigFromPath(conf.SingBoxTmplConfigPath())
+		conv, err := converter.New(conf.SingBoxTemplateConfigFile)
+		if err != nil {
+			return err
+		}
+		sb, err := conv.Convert(data)
 		if err != nil {
 			return err
 		}
 
-		newConfig, err := converter.Convert(c, tmplConf)
+		s, err := settings.NewSettings(conf.SingBox.ConfigFile)
+		if err != nil {
+			return err
+		}
+		if err := s.UpdateFrom(sb); err != nil {
+			return err
+		}
+		finalData, err := s.ToJson(providerFetchFlagFormat)
 		if err != nil {
 			return err
 		}
 
-		_, err = os.Stat(conf.SingBoxConfigPath())
-		var notExists bool
-		if err != nil {
-			if os.IsNotExist(err) {
-				notExists = true
-			} else {
-				return fmt.Errorf("check sing box config error:\n\t%w", err)
-			}
-		}
-
-		settings.LoadConfigFromPath(conf.SingBoxConfigPath())
-
-		var finalConfig *converter.SingBox
-		if notExists {
-			finalConfig = newConfig
-		} else {
-			oldConfig, err := settings.LoadConfigFromPath(conf.SingBoxConfigPath())
-			if err != nil {
-				return fmt.Errorf("load old config error:\n\t%w", err)
-			}
-
-			newConfig.Experimental.ClashAPI = oldConfig.Experimental.ClashAPI
-			newConfig.Inbounds = oldConfig.Inbounds
-		}
-
-		var finalData []byte
-		if restoreFlagFormat {
-			finalData, err = json.MarshalIndent(finalConfig, "", "  ")
-		} else {
-			finalData, err = json.Marshal(finalConfig)
-		}
-		if err != nil {
-			return fmt.Errorf("marshal to json config error:\n\t%w", err)
-		}
-
-		serv, err := service.New(conf.SingBoxBinaryPath(), conf.SingBoxConfigPath(), conf.SingBoxWorkingDir())
-		if err != nil {
-			return err
-		}
+		serv := service.New(conf, s)
 		if err := serv.CheckConfig(finalData); err != nil {
 			return err
 		}
 		// 保存配置
-		if err := os.WriteFile(conf.SingBoxConfigPath(), finalData, 0660); err != nil {
-			return fmt.Errorf("save final config error:\n\t%w", err)
+		if err := s.Save(providerFetchFlagFormat); err != nil {
+			return err
 		}
+
 		// 重启服务
 		if restoreFlagRestart {
 			if err := serv.Restart(); err != nil {

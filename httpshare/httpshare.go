@@ -2,47 +2,50 @@ package httpshare
 
 import (
 	"context"
+	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
+	"text/template"
 
 	"github.com/follow1123/sing-box-ctl/config"
-	"github.com/follow1123/sing-box-ctl/settings"
-	"github.com/olekukonko/tablewriter"
+	S "github.com/follow1123/sing-box-ctl/settings"
 )
 
+//go:embed index.html
+var indexHtml string
+
 const (
-	paramDisableWebui = "disable_webui"
-	paramResetWebui   = "reset_webui"
-	paramWebuiAddr    = "webui_addr"
-	paramWebuiSecret  = "webui_secret"
+	paramWebuiStatus         = "webui_status"
+	paramWebuiPort           = "webui_port"
+	paramWebuiSecret         = "webui_secret"
+	paramMixedStatus         = "mixed_status"
+	paramMixedPort           = "mixed_port"
+	paramMixedSysProxyStatus = "mixed_system_proxy_status"
+	paramMixedShareStatus    = "mixed_share_status"
+	paramTunStatus           = "tun_status"
 
-	paramMixedMode               = "mixed"
-	paramMixedPort               = "mixed_port"
-	paramMixedEnableSystemProxy  = "enable_sys_proxy"
-	paramMixedDisableSystemProxy = "disable_sys_proxy"
-	paramMixedAllowLAN           = "allow_lan"
-	paramMixedDenyLAN            = "deny_lan"
-	paramTunMode                 = "tun"
-
-	paramWindows = "windows"
-	paramLinux   = "linux"
-	paramAndroid = "android"
+	paramPlatform = "platform"
 
 	paramFormat = "format"
 )
 
-const urlPath = "/config"
+const (
+	homeUrlPath   = "/"
+	configUrlPath = "/config"
+)
 
 type HttpShare struct {
 	confPath     string
 	tmplConfPath string
 	server       *http.Server
 	port         uint16
+	localIP      string
 }
 
 func New(port uint16) (*HttpShare, error) {
@@ -50,13 +53,23 @@ func New(port uint16) (*HttpShare, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := &HttpShare{
-		confPath:     conf.SingBoxConfigPath(),
-		tmplConfPath: conf.SingBoxTmplConfigPath(),
-		port:         port,
+
+	localIP, err := getLocalIP()
+	if err != nil {
+		return nil, err
 	}
+
+	h := &HttpShare{
+		confPath:     conf.SingBox.ConfigFile,
+		tmplConfPath: conf.SingBoxTemplateConfigFile,
+		port:         port,
+		localIP:      localIP,
+	}
+
 	mux := http.NewServeMux()
-	mux.HandleFunc(urlPath, h.handle)
+	mux.HandleFunc(homeUrlPath, h.homeHandle)
+	mux.HandleFunc(configUrlPath, h.configHandle)
+
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
 		Handler: mux,
@@ -72,144 +85,180 @@ func (h *HttpShare) Share() error {
 	return nil
 }
 
-func (h *HttpShare) PrintHelp() error {
-	table := tablewriter.NewTable(os.Stdout, tablewriter.WithEastAsian(false))
-	paramsInfo := [][]string{
-		{"Parameter", "Description"},
-		{paramDisableWebui, "disable web ui"},
-		{paramResetWebui, "reset web ui"},
-		{paramWebuiAddr, "type string, set web ui address, (eg: localhost:9090)"},
-		{paramWebuiSecret, "type string set web ui secret"},
-
-		{paramMixedMode, "reset to mixed mode"},
-		{paramMixedPort, "type int, set mixed mode port"},
-		{paramMixedEnableSystemProxy, "enable system proxy in mixed mode"},
-		{paramMixedDisableSystemProxy, "disable system proxy in mixed mode"},
-		{paramMixedAllowLAN, "allow LAN Sharing"},
-		{paramMixedDenyLAN, "deny LAN Sharing"},
-		{paramTunMode, "reset to tun mode"},
-
-		{paramWindows, "use windows platform config"},
-		{paramLinux, "use linux platform config"},
-		{paramAndroid, "use android platform config"},
-
-		{paramFormat, "format config"},
-	}
-
-	table.Header(paramsInfo[0])
-	if err := table.Bulk(paramsInfo[1:]); err != nil {
-		log.Fatal(fmt.Errorf("render param info error:\n\t%w", err))
-	}
-
-	if err := table.Render(); err != nil {
-		log.Fatal(fmt.Errorf("render param info error:\n\t%w", err))
-	}
-	return nil
-}
-
 func (h *HttpShare) Url() string {
-	return fmt.Sprintf("http://localhost:%d%s", h.port, urlPath)
-}
-
-func (h *HttpShare) Open() error {
-	return nil
+	return fmt.Sprintf("http://%s:%d", h.localIP, h.port)
 }
 
 func (h *HttpShare) Stop(ctx context.Context) error {
 	return h.server.Shutdown(ctx)
 }
 
-func (h *HttpShare) handle(w http.ResponseWriter, r *http.Request) {
+func (h *HttpShare) homeHandle(w http.ResponseWriter, r *http.Request) {
+	s, err := S.NewSettings(h.confPath)
+	if err != nil {
+		handleInternalServerError(w, err)
+		return
+	}
+	tmplParam := make(map[string]any)
+	tmplParam["ip"] = h.localIP
+	tmplParam["port"] = h.port
+	tmplParam["platform"] = string(S.PlatformWindows)
+
+	webuiStatus, err := s.GetBool(S.StWebuiStatus)
+	if err != nil {
+		handleInternalServerError(w, err)
+		return
+	}
+	tmplParam[settingNameToStr(S.StWebuiStatus)] = webuiStatus
+	if webuiStatus {
+		webuiPort, err := s.GetUint16(S.StWebuiPort)
+		if err != nil {
+			handleInternalServerError(w, err)
+			return
+		}
+		tmplParam[settingNameToStr(S.StWebuiPort)] = webuiPort
+		webuiSecret, err := s.GetString(S.StWebuiSecret)
+		if err != nil {
+			handleInternalServerError(w, err)
+			return
+		}
+		tmplParam[settingNameToStr(S.StWebuiSecret)] = webuiSecret
+	}
+
+	mixedStatus, err := s.GetBool(S.StMixedStatus)
+	if err != nil {
+		handleInternalServerError(w, err)
+		return
+	}
+
+	tmplParam[settingNameToStr(S.StMixedStatus)] = mixedStatus
+
+	if mixedStatus {
+		mixedPort, err := s.GetUint16(S.StMixedPort)
+		if err != nil {
+			handleInternalServerError(w, err)
+			return
+		}
+		tmplParam[settingNameToStr(S.StMixedPort)] = mixedPort
+		mixedShare, err := s.GetBool(S.StMixedShareStatus)
+		if err != nil {
+			handleInternalServerError(w, err)
+			return
+		}
+		tmplParam[settingNameToStr(S.StMixedShareStatus)] = mixedShare
+
+		mixedSysProxy, err := s.GetBool(S.StMixedSysProxyStatus)
+		if err != nil {
+			handleInternalServerError(w, err)
+			return
+		}
+		tmplParam[settingNameToStr(S.StMixedSysProxyStatus)] = mixedSysProxy
+
+	}
+
+	tunStatus, err := s.GetBool(S.StTunStatus)
+	if err != nil {
+		handleInternalServerError(w, err)
+		return
+	}
+	tmplParam[settingNameToStr(S.StTunStatus)] = tunStatus
+
+	jsonData, err := json.Marshal(tmplParam)
+	if err != nil {
+		handleInternalServerError(w, err)
+		return
+	}
+
+	tmpl := template.Must(template.New("home").Parse(indexHtml))
+	if err := tmpl.Execute(w, string(jsonData)); err != nil {
+		handleInternalServerError(w, err)
+		return
+	}
+}
+
+func (h *HttpShare) configHandle(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		return
 	}
 	params := r.URL.Query()
 
-	s, err := settings.NewSettings(h.tmplConfPath, h.confPath)
+	s, err := S.NewSettings(h.confPath)
 	if err != nil {
 		handleInternalServerError(w, err)
 	}
+	if err := s.SetTemplateConfig(h.tmplConfPath); err != nil {
+		handleInternalServerError(w, err)
+		return
+	}
+	settingsMap := make(map[S.SettingName]string)
+
 	// clash_api 相关配置
-	webuiSetting := settings.WebUISettings{Enabled: true}
-	if params.Has(paramWebuiAddr) {
-		weuiAddr := params.Get(paramWebuiAddr)
-		webuiSetting.Addr = &weuiAddr
+	if params.Has(paramWebuiPort) {
+		settingsMap[toSettingName(paramWebuiPort)] = params.Get(paramWebuiPort)
 	}
 	if params.Has(paramWebuiSecret) {
-		webuiSecret := strings.TrimSpace(params.Get(paramWebuiSecret))
-		webuiSetting.Password = &webuiSecret
+		settingsMap[toSettingName(paramWebuiSecret)] = params.Get(paramWebuiSecret)
 	}
-	if params.Has(paramResetWebui) {
-		webuiSetting.Reset = true
+	if params.Has(paramWebuiStatus) {
+		settingsMap[toSettingName(paramWebuiStatus)] = params.Get(paramWebuiStatus)
 	}
-	if params.Has(paramDisableWebui) {
-		webuiSetting.Enabled = false
-	}
-	s.UpdateWebUISettings(webuiSetting)
 
 	// inbound 模式相关配置
-	mixedProxySettings := settings.MixedProxySettings{Enabled: true}
 	if params.Has(paramMixedPort) {
-		mixedPort, err := strconv.ParseInt(params.Get(paramMixedPort), 10, 16)
+		settingsMap[toSettingName(paramMixedPort)] = params.Get(paramMixedPort)
+	}
+	if params.Has(paramMixedSysProxyStatus) {
+		settingsMap[toSettingName(paramMixedSysProxyStatus)] = params.Get(paramMixedSysProxyStatus)
+	}
+	if params.Has(paramMixedShareStatus) {
+		settingsMap[toSettingName(paramMixedShareStatus)] = params.Get(paramMixedShareStatus)
+	}
+	if params.Has(paramMixedStatus) {
+		settingsMap[toSettingName(paramMixedStatus)] = params.Get(paramMixedStatus)
+	}
+
+	if params.Has(paramTunStatus) {
+		settingsMap[toSettingName(paramTunStatus)] = params.Get(paramTunStatus)
+	}
+	if params.Has(paramPlatform) {
+		var err error
+		switch S.Platform(params.Get(paramPlatform)) {
+		case S.PlatformWindows:
+			err = s.SetPlatform(S.PlatformWindows)
+		case S.PlatformLinux:
+			err = s.SetPlatform(S.PlatformLinux)
+		case S.PlatformAndroid:
+			// 安卓强制使用tun模式
+			err = s.Set(S.StTunStatus, "true")
+			if err == nil {
+				err = s.SetPlatform(S.PlatformAndroid)
+			}
+		}
 		if err != nil {
-			handleBadRequestError(w, paramMixedPort, err)
+			handleInternalServerError(w, err)
 			return
 		}
-		mp := uint16(mixedPort)
-		mixedProxySettings.Port = &mp
 	}
-	if params.Has(paramMixedEnableSystemProxy) {
-		var enable = true
-		mixedProxySettings.EnableSystemProxy = &enable
-	}
-	if params.Has(paramMixedDisableSystemProxy) {
-		var enable = false
-		mixedProxySettings.EnableSystemProxy = &enable
-	}
-	if params.Has(paramMixedAllowLAN) {
-		var enable = true
-		mixedProxySettings.AllowLAN = &enable
-	}
-	if params.Has(paramMixedDenyLAN) {
-		var enable = false
-		mixedProxySettings.AllowLAN = &enable
-	}
-	if params.Has(paramMixedMode) {
-		mixedProxySettings.Reset = true
-	}
-	if err := s.UpdateMixedProxySettings(mixedProxySettings); err != nil {
+
+	if err := s.SetMap(settingsMap); err != nil {
 		handleInternalServerError(w, err)
 		return
 	}
 
-	if params.Has(paramTunMode) {
-		s.UpdateTunSettings(true)
-	}
-	if params.Has(paramWindows) {
-		if err := s.UpdatePlatformSettings(settings.PlatformWindows); err != nil {
+	formatData := false
+	if params.Has(paramFormat) {
+		formatStr := params.Get(paramFormat)
+		f, err := strconv.ParseBool(formatStr)
+		if err != nil {
+			// 请求参数错误，懒得多写一个处理方法了，无伤大雅
 			handleInternalServerError(w, err)
 			return
 		}
-
+		formatData = f
 	}
-	if params.Has(paramLinux) {
-		if err := s.UpdatePlatformSettings(settings.PlatformLinux); err != nil {
-			handleInternalServerError(w, err)
-			return
-		}
 
-	}
-	if params.Has(paramAndroid) {
-		fmt.Printf("\"use android\": %v\n", "use android")
-		s.UpdateTunSettings(true)
-		if err := s.UpdatePlatformSettings(settings.PlatformAndroid); err != nil {
-			handleInternalServerError(w, err)
-			return
-		}
-
-	}
 	// 获取json数据
-	data, err := s.ToJson(params.Has(paramFormat))
+	data, err := s.ToJson(formatData)
 	if err != nil {
 		handleInternalServerError(w, err)
 		return
@@ -228,10 +277,28 @@ func handleError(w http.ResponseWriter, err error, code int) {
 	http.Error(w, err.Error(), code)
 }
 
-func handleBadRequestError(w http.ResponseWriter, paramName string, err error) {
-	handleError(w, fmt.Errorf("invalid param '%s'\n\t%w", paramName, err), http.StatusBadRequest)
-}
-
 func handleInternalServerError(w http.ResponseWriter, err error) {
 	handleError(w, fmt.Errorf("Internal Server Error\n\t%w", err), http.StatusInternalServerError)
+}
+
+func toSettingName(paramName string) S.SettingName {
+	return S.SettingName(strings.ReplaceAll(paramName, "_", "."))
+}
+
+func settingNameToStr(name S.SettingName) string {
+	return strings.ReplaceAll(string(name), ".", "_")
+}
+
+func getLocalIP() (string, error) {
+	// 连接到一个外部 IP（不需要真的发送数据）
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return "", fmt.Errorf("test connect error:\n\t%w", err)
+	}
+	defer conn.Close()
+
+	// 获取本地地址（本机出口 IP）
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.String(), nil
+
 }

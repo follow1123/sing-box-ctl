@@ -3,86 +3,76 @@ package config
 import (
 	_ "embed"
 	"fmt"
-	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 )
 
-//go:embed config_tmpl.json
-var singBoxConfigTemplate string
+//go:embed singbox_template_config.json
+var singboxTemplateConfigData []byte
 
 type Config struct {
-	home                  string
-	configPath            string
-	singBoxBinaryPath     string
-	singBoxConfigPath     string
-	singBoxTmplConfigPath string
-	singBoxWorkingDir     string
-	archiveDir            string
+	Home                      string
+	ConfigFile                string
+	ArchiveDir                string
+	SingBoxTemplateConfigFile string
+	SingBoxServiceScript      string
+	SingBox                   SingBoxConfig
+}
+
+type SingBoxConfig struct {
+	Binary     string
+	ConfigFile string
+	WorkingDir string
 }
 
 func New(home string) (*Config, error) {
 	home = filepath.Clean(os.ExpandEnv(home))
 
-	if err := os.MkdirAll(home, 0755); err != nil {
+	singboxBin, err := exec.LookPath("sing-box")
+	if err != nil {
+		return nil, fmt.Errorf("cannot find sing-box find in path:\n\t%w", err)
+	}
+	singboxDir := filepath.Join(home, "singbox")
+	singBoxConfig := SingBoxConfig{
+		Binary:     singboxBin,
+		ConfigFile: filepath.Join(singboxDir, "config.json"),
+		WorkingDir: filepath.Join(singboxDir, "working_dir"),
+	}
+
+	if err := os.MkdirAll(home, 0700); err != nil {
 		return nil, fmt.Errorf("init config home '%s' error: \n\t%w", home, err)
 	}
-	singBoxTmplConfigPath := filepath.Join(home, "config_tmpl.json")
-	file, err := os.OpenFile(singBoxTmplConfigPath, os.O_CREATE|os.O_EXCL, 0660)
-	var tmplExists bool
-	if err != nil {
-		if os.IsExist(err) {
-			tmplExists = true
-		} else {
-			return nil, fmt.Errorf("open template config %s error:\n\t%w", singBoxTmplConfigPath, err)
-		}
+	if err := os.MkdirAll(singboxDir, 0700); err != nil {
+		return nil, fmt.Errorf("init singbox home error:\n\t%w", err)
 	}
-	defer file.Close()
-	if !tmplExists {
-		_, err := io.WriteString(file, singBoxConfigTemplate)
-		if err != nil {
+
+	// 初始化 singbox 模板配置
+	singboxTemplateConfigFile := filepath.Join(home, "singbox_template_config.json")
+	if _, err := os.Stat(singboxTemplateConfigFile); os.IsNotExist(err) {
+		if err := os.WriteFile(singboxTemplateConfigFile, singboxTemplateConfigData, 0600); err != nil {
 			return nil, fmt.Errorf("init template config error:\n\t%w", err)
 		}
 	}
 
+	// 初始化 singbox 脚本
+	singboxScriptFile := filepath.Join(home, ServiceScript)
+	if _, err := os.Stat(singboxScriptFile); os.IsNotExist(err) {
+		if err := os.WriteFile(singboxScriptFile, singboxServiceScriptData, 0700); err != nil {
+			return nil, fmt.Errorf("init singbox service script error:\n\t%w", err)
+		}
+	}
+
 	return &Config{
-		home:                  home,
-		configPath:            filepath.Join(home, "sing-box-ctl-config.json"),
-		singBoxBinaryPath:     filepath.Join(home, BinaryName),
-		singBoxConfigPath:     filepath.Join(home, "config.json"),
-		singBoxTmplConfigPath: singBoxTmplConfigPath,
-		singBoxWorkingDir:     filepath.Join(home, "wd"),
-		archiveDir:            filepath.Join(home, "archived_config"),
+		Home:                      home,
+		ConfigFile:                filepath.Join(home, "config.json"),
+		ArchiveDir:                filepath.Join(home, "archived"),
+		SingBoxTemplateConfigFile: singboxTemplateConfigFile,
+		SingBoxServiceScript:      singboxScriptFile,
+		SingBox:                   singBoxConfig,
 	}, nil
 }
 
 func Default() (*Config, error) {
 	return New(ConfigHome)
-}
-
-func (c Config) Home() string {
-	return c.home
-}
-
-func (c Config) ConfigPath() string {
-	return c.configPath
-}
-
-func (c Config) SingBoxBinaryPath() string {
-	return c.singBoxBinaryPath
-}
-func (c Config) SingBoxConfigPath() string {
-	return c.singBoxConfigPath
-}
-
-func (c Config) SingBoxTmplConfigPath() string {
-	return c.singBoxTmplConfigPath
-}
-
-func (c Config) SingBoxWorkingDir() string {
-	return c.singBoxWorkingDir
-}
-
-func (c Config) ArchiveDir() string {
-	return c.archiveDir
 }

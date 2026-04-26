@@ -16,7 +16,7 @@ var providerDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		provider, err := P.New(conf.ConfigPath())
+		provider, err := P.New(conf.ConfigFile)
 		if err != nil {
 			return err
 		}

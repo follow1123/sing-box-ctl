@@ -1,11 +1,8 @@
 package cmd
 
 import (
-	"os"
-
 	"github.com/follow1123/sing-box-ctl/config"
 	P "github.com/follow1123/sing-box-ctl/provider"
-	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 )
 
@@ -19,11 +16,10 @@ var providerCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		provider, err := P.New(conf.ConfigPath())
+		provider, err := P.New(conf.ConfigFile)
 		if err != nil {
 			return err
 		}
-		var tableData [][]string
 		providers := provider.List()
 		if len(providers) == 0 {
 			cmd.Println("no provider use 'provider add' subcommand to add")
@@ -32,18 +28,10 @@ var providerCmd = &cobra.Command{
 		defaultProvider := provider.GetDefault()
 		for _, p := range providers {
 			if p.Name == defaultProvider.Name {
-				tableData = append(tableData, []string{p.Name, p.Url, "*"})
+				cmd.Printf("%s(default): %s\n", p.Name, p.Url)
 			} else {
-				tableData = append(tableData, []string{p.Name, p.Url})
+				cmd.Printf("%s: %s\n", p.Name, p.Url)
 			}
-		}
-		table := tablewriter.NewTable(os.Stdout, tablewriter.WithEastAsian(false))
-		table.Header("name", "url", "default")
-		if err := table.Bulk(tableData); err != nil {
-			return err
-		}
-		if err := table.Render(); err != nil {
-			return err
 		}
 		return nil
 	},
