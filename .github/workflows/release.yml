@@ -19,11 +19,13 @@ jobs:
           export GOOS=linux
           export GOARCH=amd64
           output_name=sbctl-$GOOS-$GOARCH
-          go build -o dist/$output_name ./
+          CGO_ENABLED=0 go build -o dist/$output_name ./
 
           export GOOS=windows
           output_name=sbctl-$GOOS-$GOARCH.exe
-          go build -o dist/$output_name ./
+          tray_output_name=sbtray-$GOOS-$GOARCH.exe
+          CGO_ENABLED=0 go build -o dist/$output_name ./
+          Go111MODULE=on go build -ldflags "-H=windowsgui" -o dist/$tray_output_name ./sbtray
       - name: Sum
         run: |
           cd dist
