@@ -7,6 +7,7 @@
 - `mixed` 下的系统代理、局域网共享开关
 - 订阅转换（支持 clash 转 sing-box 的部分协议）
 - 配置共享，将转换后的配置使用 http 接口提供给内网的其他设备
+- windows 下系统托盘
 
 ---
 
@@ -85,13 +86,13 @@ sbctl provider restore
 
 ```bash
 # 开启 mixed 模式下的局域网共享并重启
-sbctl update --allow-lan -r
+sbctl update --enable-proxy-sharing -r
 
 # 切换为 tun 模式并重启
-sbctl update --tun -r
+sbctl update -t -r
 
 # 禁用 external controller (webui) 并重启
-sbctl update --disable-webui -r
+sbctl update -W -r
 
 # 格式化配置
 sbctl update --format
@@ -108,33 +109,18 @@ sbctl status
 # 共享配置
 sbctl share
 
-# 使用系统默认浏览器打开 web ui
-sbctl webui
-
 # 从上次下载的订阅配置恢复到配置文件（手动修改配置后可使用这个命令恢复）
 sbctl restore
-
-# 查看日志
-sbctl log
 ```
 
 ---
 
 ### 相关文件
 
-配置文件 Windows 在：`%LOCALAPPDATA%/singboxctl`，Linux 在：`/etc/singboxctl`
-
-Linux 下使用 `systemd` 管理 sing-box 服务，名称为 `sing-box.service`，服务文件存放在 `/etc/systemd/system/sing-box.service`
+配置文件 Windows 在：`%LOCALAPPDATA%/singboxctl`，Linux 在：`$HOME/.config/singboxctl`
 
 ---
 
-### 可选配置
+### Windows
 
-#### 集成 Windows 右键菜单
-
-> Windows 10 下测试可用，Windows 11 未测试
-
-```bash
-# 初始化右键菜单
-sbctl rcmenu --init
-```
+Windows 下有一个 sbtray 命令，启动一个系统托盘，支持、mixed 模式启用、禁用，tun 模式启用、禁用，等部分功能
