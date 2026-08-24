@@ -4,7 +4,6 @@ import (
 	"strconv"
 
 	"github.com/follow1123/sing-box-ctl/config"
-	"github.com/follow1123/sing-box-ctl/service"
 	S "github.com/follow1123/sing-box-ctl/settings"
 	"github.com/spf13/cobra"
 )
@@ -25,8 +24,6 @@ var (
 
 	updateFlagEnableTun  bool
 	updateFlagDisableTun bool
-
-	updateFlagRestart bool
 
 	updateFlagFormat bool
 )
@@ -108,14 +105,6 @@ var updateCmd = &cobra.Command{
 		if err := s.Save(updateFlagFormat); err != nil {
 			return err
 		}
-
-		// 重启服务
-		if updateFlagRestart {
-			serv := service.New(conf, s)
-			if err := serv.Restart(); err != nil {
-				return err
-			}
-		}
 		return nil
 	},
 }
@@ -136,8 +125,6 @@ func init() {
 
 	updateCmd.Flags().BoolVarP(&updateFlagEnableTun, "enable-tun", "t", false, "enable tun mode")
 	updateCmd.Flags().BoolVarP(&updateFlagDisableTun, "disable-tun", "T", false, "disable tun mode")
-
-	updateCmd.Flags().BoolVarP(&updateFlagRestart, "restart", "r", false, "restart service")
 
 	updateCmd.Flags().BoolVarP(&updateFlagFormat, "format", "f", false, "format config")
 	rootCmd.AddCommand(updateCmd)

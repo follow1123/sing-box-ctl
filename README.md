@@ -1,4 +1,4 @@
-## Sing-box 辅助工具
+## Sing-box 配置辅助工具
 
 ### 特性
 
@@ -7,7 +7,6 @@
 - `mixed` 下的系统代理、局域网共享开关
 - 订阅转换（支持 clash 转 sing-box 的部分协议）
 - 配置共享，将转换后的配置使用 http 接口提供给内网的其他设备
-- windows 下系统托盘
 
 ---
 
@@ -17,8 +16,8 @@
 # 设置订阅信息
 sbctl provider add <name> <your_provider_sub_url>
 
-# 获取配置并启动
-sbctl provider fetch -r
+# 获取并转换配置
+sbctl provider fetch
 ```
 
 ---
@@ -42,15 +41,6 @@ go build -o sbctl
 
 ### 功能
 
-#### 服务管理
-
-```bash
-# 启动、停止、重启服务
-sbctl [start|stop|restart]
-```
-
----
-
 #### `provider` 子命令
 
 ```bash
@@ -68,11 +58,8 @@ sbctl provider update <name> <new_url>
 # 删除
 sbctl provider delete <name>
 
-# 获取配置
+# 获取并转换配置
 sbctl provider fetch
-
-# 获取配置并重启服务
-sbctl provider fetch -r
 
 # 恢复订阅配置（用于恢复自己修改后的配置）
 sbctl provider restore
@@ -85,14 +72,14 @@ sbctl provider restore
 > 详细参考 `sbctl update -h`
 
 ```bash
-# 开启 mixed 模式下的局域网共享并重启
-sbctl update --enable-proxy-sharing -r
+# 开启 mixed 模式下的局域网共享
+sbctl update --enable-proxy-sharing
 
-# 切换为 tun 模式并重启
-sbctl update -t -r
+# 切换为 tun 模式
+sbctl update -t
 
-# 禁用 external controller (webui) 并重启
-sbctl update -W -r
+# 禁用 external controller (webui)
+sbctl update -W
 
 # 格式化配置
 sbctl update --format
@@ -103,9 +90,6 @@ sbctl update --format
 #### 其他
 
 ```bash
-# 查看状态信息
-sbctl status
-
 # 共享配置
 sbctl share
 
@@ -118,9 +102,3 @@ sbctl restore
 ### 相关文件
 
 配置文件 Windows 在：`%LOCALAPPDATA%/singboxctl`，Linux 在：`$HOME/.config/singboxctl`
-
----
-
-### Windows
-
-Windows 下有一个 sbtray 命令，启动一个系统托盘，支持、mixed 模式启用、禁用，tun 模式启用、禁用，等部分功能

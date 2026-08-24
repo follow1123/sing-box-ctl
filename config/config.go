@@ -16,14 +16,12 @@ type Config struct {
 	ConfigFile                string
 	ArchiveDir                string
 	SingBoxTemplateConfigFile string
-	SingBoxServiceScript      string
 	SingBox                   SingBoxConfig
 }
 
 type SingBoxConfig struct {
 	Binary     string
 	ConfigFile string
-	WorkingDir string
 }
 
 func New(home string) (*Config, error) {
@@ -37,7 +35,6 @@ func New(home string) (*Config, error) {
 	singBoxConfig := SingBoxConfig{
 		Binary:     singboxBin,
 		ConfigFile: filepath.Join(singboxDir, "config.json"),
-		WorkingDir: filepath.Join(singboxDir, "working_dir"),
 	}
 
 	if err := os.MkdirAll(home, 0700); err != nil {
@@ -55,20 +52,11 @@ func New(home string) (*Config, error) {
 		}
 	}
 
-	// 初始化 singbox 脚本
-	singboxScriptFile := filepath.Join(home, ServiceScript)
-	if _, err := os.Stat(singboxScriptFile); os.IsNotExist(err) {
-		if err := os.WriteFile(singboxScriptFile, singboxServiceScriptData, 0700); err != nil {
-			return nil, fmt.Errorf("init singbox service script error:\n\t%w", err)
-		}
-	}
-
 	return &Config{
 		Home:                      home,
 		ConfigFile:                filepath.Join(home, "config.json"),
 		ArchiveDir:                filepath.Join(home, "archived"),
 		SingBoxTemplateConfigFile: singboxTemplateConfigFile,
-		SingBoxServiceScript:      singboxScriptFile,
 		SingBox:                   singBoxConfig,
 	}, nil
 }

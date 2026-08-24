@@ -2,44 +2,60 @@ package converter_test
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
-	"github.com/follow1123/sing-box-ctl/config"
 	"github.com/follow1123/sing-box-ctl/converter"
-	"github.com/follow1123/sing-box-ctl/settings"
-	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/assert"
 )
 
+const tmplConfig = `{
+  "custom": {
+    "default_inbound_index": 0,
+    "node_selection_group_name": "节点选择",
+    "auto_selection_group_name": "自动选择",
+    "direct_group_name": "直连",
+    "escape_group_name": "漏网之鱼",
+    "direct_dns_server": "dns-ali",
+    "proxy_dns_server": "dns-google",
+    "direct_rule_keywords": ["直连", "direct", "绕过代理"],
+    "direct_ruleset_index_in_dns": 0,
+    "proxy_ruleset_index_in_dns": 1,
+    "direct_ruleset_index_in_route": 0,
+    "proxy_ruleset_index_in_route": 1,
+    "selectors": []
+  },
+  "dns": {
+    "servers": [],
+    "rules": []
+  },
+  "inbounds": [
+    {
+      "type": "mixed",
+      "tag": "mixed-in",
+      "listen": "127.0.0.1",
+      "listen_port": 7899
+    }
+  ],
+  "outbounds": [],
+  "route": {
+    "rules": [],
+    "rule_set": []
+  }
+}`
+
+func writeTmplConfig(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "tmpl.json")
+	if err := os.WriteFile(path, []byte(tmplConfig), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestConvertSuccess(t *testing.T) {
 	data := []byte(`
-port: 7890
-socks-port: 7891
-redir-port: 7892
-tproxy-port: 7893
-mixed-port: 7894
-allow-lan: true
-bind-address: '*'
-mode: rule
-ipv6: false
-log-level: info
-external-controller: '0.0.0.0:9090'
-dns:
-  enable: true
-  ipv6: false
-  prefer-h3: true
-  enhanced-mode: fake-ip
-  fake-ip-range: 198.18.0.1/16
-  use-hosts: true
-  default-nameserver: [180.184.1.1, 119.29.29.29, 223.5.5.5]
-  nameserver:
-    - https://dns.alidns.com/dns-query
-    - https://120.53.53.53/dns-query
-    - https://doh.pub/dns-query
-  fake-ip-filter:
-    - "+.lan"
-    - "+.local"
-    - "+.market.xiaomi.com"
 proxies:
   - name: "aaa"
     server: a.com
@@ -54,11 +70,7 @@ proxies:
     type: trojan
     password: deaf3be4-7a94-32d0-8d54-d6610143755d
     sni: b.b.com
-    #alpn:
-    # - h2
-    # - http/1.1
     skip-cert-verify: false
-proxy-groups:
 
 rules:
 - IP-CIDR,102.198.138.0/18,🎯 直连,no-resolve
@@ -67,21 +79,36 @@ rules:
 - GEOIP,CN,🎯 直连
 - MATCH,🐟 漏网之鱼`)
 
-	conf, err := config.Default()
-	assert.NoError(t, err)
-	sbTmpl, err := settings.LoadConfigFromPath(conf.SingBoxTmplConfigPath())
+	conv, err := converter.New(writeTmplConfig(t))
 	assert.NoError(t, err)
 
-	c := &converter.Clash{}
-	err = yaml.Unmarshal(data, c)
-	assert.NoError(t, err)
-
-	sb, err := converter.Convert(c, sbTmpl)
+	sb, err := conv.Convert(data)
 	assert.NoError(t, err)
 	fmt.Printf("sb.Outbounds: %v\n", sb.Outbounds)
+
+	// 节点转换
 	assert.Contains(t, sb.Outbounds[0]["tag"], "aaa")
 	assert.Contains(t, sb.Outbounds[1]["tag"], "bbb")
+	// 分组
+	assert.Equal(t, "selector", sb.Outbounds[2]["type"])
+	assert.Equal(t, "节点选择", sb.Outbounds[2]["tag"])
+	assert.Equal(t, "urltest", sb.Outbounds[3]["type"])
+	assert.Equal(t, "直连", sb.Outbounds[len(sb.Outbounds)-2]["tag"])
+	assert.Equal(t, "漏网之鱼", sb.Outbounds[len(sb.Outbounds)-1]["tag"])
+	// 规则转换
+	assert.Equal(t, 2, len(sb.DNS.Rules))
+	assert.Equal(t, 2, len(sb.Route.Rules))
+	assert.Equal(t, 2, len(sb.Route.RuleSet))
+	// 只保留默认 inbound
+	assert.Equal(t, 1, len(sb.Inbounds))
+	assert.Equal(t, "mixed", sb.Inbounds[0]["type"])
 }
 
 func TestConvertFailure(t *testing.T) {
+	conv, err := converter.New(writeTmplConfig(t))
+	assert.NoError(t, err)
+
+	// 无效的 clash 配置
+	_, err = conv.Convert([]byte("invalid: [yaml"))
+	assert.Error(t, err)
 }

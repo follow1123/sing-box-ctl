@@ -14,8 +14,7 @@ import (
 )
 
 var (
-	restoreFlagFormat  bool
-	restoreFlagRestart bool
+	restoreFlagFormat bool
 )
 
 var restoreCmd = &cobra.Command{
@@ -58,25 +57,18 @@ var restoreCmd = &cobra.Command{
 		if err := s.UpdateFrom(sb); err != nil {
 			return err
 		}
-		finalData, err := s.ToJson(providerFetchFlagFormat)
+		finalData, err := s.ToJson(restoreFlagFormat)
 		if err != nil {
 			return err
 		}
 
-		serv := service.New(conf, s)
+		serv := service.New(conf)
 		if err := serv.CheckConfig(finalData); err != nil {
 			return err
 		}
 		// 保存配置
-		if err := s.Save(providerFetchFlagFormat); err != nil {
+		if err := s.Save(restoreFlagFormat); err != nil {
 			return err
-		}
-
-		// 重启服务
-		if restoreFlagRestart {
-			if err := serv.Restart(); err != nil {
-				return err
-			}
 		}
 		return nil
 	},
@@ -84,7 +76,6 @@ var restoreCmd = &cobra.Command{
 
 func init() {
 	restoreCmd.Flags().BoolVarP(&restoreFlagFormat, "format", "f", false, "format config")
-	restoreCmd.Flags().BoolVarP(&restoreFlagRestart, "restart", "r", false, "restart service")
 
 	rootCmd.AddCommand(restoreCmd)
 }

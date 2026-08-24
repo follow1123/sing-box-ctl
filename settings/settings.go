@@ -359,14 +359,6 @@ func (s *Settings) Update() error {
 	return nil
 }
 
-func (s *Settings) HaveHighPermSetting() (bool, error) {
-	tunStatus, err := s.GetBool(StTunStatus)
-	if err != nil {
-		return false, err
-	}
-	return tunStatus, nil
-}
-
 func (s *Settings) GetConfig() *C.SingBox {
 	return s.conf
 }

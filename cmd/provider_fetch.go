@@ -13,8 +13,7 @@ import (
 )
 
 var (
-	providerFetchFlagFormat  bool
-	providerFetchFlagRestart bool
+	providerFetchFlagFormat bool
 )
 
 var providerFetchCmd = &cobra.Command{
@@ -63,7 +62,7 @@ var providerFetchCmd = &cobra.Command{
 			return err
 		}
 
-		serv := service.New(conf, s)
+		serv := service.New(conf)
 		if err := serv.CheckConfig(finalData); err != nil {
 			return err
 		}
@@ -80,19 +79,12 @@ var providerFetchCmd = &cobra.Command{
 		if err := archiver.Save(data); err != nil {
 			return err
 		}
-		// 重启服务
-		if providerFetchFlagRestart {
-			if err := serv.Restart(); err != nil {
-				return err
-			}
-		}
 		return nil
 	},
 }
 
 func init() {
 	providerFetchCmd.Flags().BoolVarP(&providerFetchFlagFormat, "format", "f", false, "format config")
-	providerFetchCmd.Flags().BoolVarP(&providerFetchFlagRestart, "restart", "r", false, "restart service")
 
 	providerCmd.AddCommand(providerFetchCmd)
 }
