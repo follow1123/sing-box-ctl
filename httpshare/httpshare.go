@@ -1,3 +1,8 @@
+//go:build legacy
+// +build legacy
+
+// httpshare 保留供后续复用（当前新架构实时转换，不再使用此包）。
+// 需要启用时移除上面的 build tag。
 package httpshare
 
 import (

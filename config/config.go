@@ -4,63 +4,62 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+
+	"github.com/follow1123/sing-box-ctl/provider"
 )
 
 //go:embed singbox_template_config.json
 var singboxTemplateConfigData []byte
 
+const (
+	// TemplateFileName 转换模板文件名（位于 working_dir 下）
+	TemplateFileName = "singbox_template_config.json"
+	// ProvidersDirName provider 订阅数据目录名（位于 working_dir 下）
+	ProvidersDirName = "providers"
+)
+
 type Config struct {
-	Home                      string
-	ConfigFile                string
-	ArchiveDir                string
-	SingBoxTemplateConfigFile string
-	SingBox                   SingBoxConfig
+	ConfigPath   string
+	WorkingDir   string
+	ProvidersDir string
+	TemplateFile string
+	Providers    []provider.ProviderConfig
 }
 
-type SingBoxConfig struct {
-	Binary     string
-	ConfigFile string
-}
+// New 从主配置文件加载配置，解析路径并初始化工作目录
+func New(configPath string) (*Config, error) {
+	configPath = filepath.Clean(configPath)
 
-func New(home string) (*Config, error) {
-	home = filepath.Clean(os.ExpandEnv(home))
-
-	singboxBin, err := exec.LookPath("sing-box")
+	p, err := provider.New(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("cannot find sing-box find in path:\n\t%w", err)
+		return nil, err
 	}
-	singboxDir := filepath.Join(home, "singbox")
-	singBoxConfig := SingBoxConfig{
-		Binary:     singboxBin,
-		ConfigFile: filepath.Join(singboxDir, "config.json"),
-	}
-
-	if err := os.MkdirAll(home, 0700); err != nil {
-		return nil, fmt.Errorf("init config home '%s' error: \n\t%w", home, err)
-	}
-	if err := os.MkdirAll(singboxDir, 0700); err != nil {
-		return nil, fmt.Errorf("init singbox home error:\n\t%w", err)
+	workingDir := p.WorkingDir()
+	if workingDir == "" {
+		return nil, fmt.Errorf("working_dir is not set in config file %s", configPath)
 	}
 
-	// 初始化 singbox 模板配置
-	singboxTemplateConfigFile := filepath.Join(home, "singbox_template_config.json")
-	if _, err := os.Stat(singboxTemplateConfigFile); os.IsNotExist(err) {
-		if err := os.WriteFile(singboxTemplateConfigFile, singboxTemplateConfigData, 0600); err != nil {
+	providersDir := filepath.Join(workingDir, ProvidersDirName)
+	templateFile := filepath.Join(workingDir, TemplateFileName)
+
+	// 初始化工作目录
+	if err := os.MkdirAll(providersDir, 0700); err != nil {
+		return nil, fmt.Errorf("init providers dir error:\n\t%w", err)
+	}
+
+	// 初始化转换模板
+	if _, err := os.Stat(templateFile); os.IsNotExist(err) {
+		if err := os.WriteFile(templateFile, singboxTemplateConfigData, 0600); err != nil {
 			return nil, fmt.Errorf("init template config error:\n\t%w", err)
 		}
 	}
 
 	return &Config{
-		Home:                      home,
-		ConfigFile:                filepath.Join(home, "config.json"),
-		ArchiveDir:                filepath.Join(home, "archived"),
-		SingBoxTemplateConfigFile: singboxTemplateConfigFile,
-		SingBox:                   singBoxConfig,
+		ConfigPath:   configPath,
+		WorkingDir:   workingDir,
+		ProvidersDir: providersDir,
+		TemplateFile: templateFile,
+		Providers:    p.List(),
 	}, nil
-}
-
-func Default() (*Config, error) {
-	return New(ConfigHome)
 }

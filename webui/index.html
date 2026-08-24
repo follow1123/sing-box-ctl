@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>sbctl - Provider 管理</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem; color: #333; }
+  h1 { font-size: 1.4rem; }
+  table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+  th, td { border: 1px solid #ddd; padding: 0.5rem; text-align: left; }
+  th { background: #f5f5f5; }
+  input, select { padding: 0.3rem; margin-right: 0.5rem; }
+  button { padding: 0.3rem 0.8rem; cursor: pointer; }
+  .msg { color: #999; font-size: 0.85rem; }
+  .error { color: #c00; margin-top: 0.5rem; white-space: pre-wrap; }
+  .ok { color: #080; }
+  form { margin-top: 1rem; }
+  .actions button { margin-right: 0.3rem; }
+</style>
+</head>
+<body>
+<h1>Provider 管理</h1>
+
+<div class="error" id="error"></div>
+
+<h2>添加 Provider</h2>
+<form id="add-form">
+  <input id="f-name" placeholder="名称" required>
+  <input id="f-url" placeholder="订阅 URL（http/https）">
+  <input id="f-file" type="file" style="display:none">
+  <select id="f-source">
+    <option value="url">url</option>
+    <option value="upload">upload</option>
+  </select>
+  <input id="f-message" placeholder="更新提示（可选）">
+  <button type="submit">添加</button>
+</form>
+
+<h2>Provider 列表</h2>
+<table>
+  <thead>
+    <tr>
+      <th>名称</th>
+      <th>URL</th>
+      <th>来源</th>
+      <th>提示</th>
+      <th>操作</th>
+    </tr>
+  </thead>
+  <tbody id="providers"></tbody>
+</table>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const errorBox = $('error');
+
+function showError(msg) { errorBox.textContent = msg || ''; }
+
+async function api(url, options) {
+  const resp = await fetch(url, options);
+  const text = await resp.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (e) {}
+  if (!resp.ok) {
+    const msg = data && data.error ? data.error : ('HTTP ' + resp.status);
+    throw new Error(msg);
+  }
+  return data;
+}
+
+async function load() {
+  try {
+    const list = await api('/api/providers');
+    const tbody = $('providers');
+    tbody.innerHTML = '';
+    for (const p of list) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${escapeHtml(p.name)}</td>
+        <td class="msg">${escapeHtml(p.url || '')}</td>
+        <td>${escapeHtml(p.source)}</td>
+        <td class="msg">${escapeHtml(p.message || '')}</td>
+        <td class="actions">
+          <button data-act="edit">编辑</button>
+          <button data-act="fetch">下载</button>
+          <button data-act="delete">删除</button>
+        </td>`;
+      tr.querySelector('[data-act="edit"]').onclick = () => fillForm(p);
+      tr.querySelector('[data-act="fetch"]').onclick = () => fetchSub(p);
+      tr.querySelector('[data-act="delete"]').onclick = () => del(p);
+      tbody.appendChild(tr);
+    }
+    showError('');
+  } catch (e) {
+    showError('加载列表失败: ' + e.message);
+  }
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+let editingUuid = null;
+
+function updateSourceUI() {
+  const src = $('f-source').value;
+  $('f-url').style.display = src === 'url' ? '' : 'none';
+  $('f-file').style.display = src === 'upload' ? '' : 'none';
+  if (src === 'upload') $('f-url').value = '';
+}
+$('f-source').onchange = updateSourceUI;
+
+function fillForm(p) {
+  editingUuid = p.uuid;
+  $('f-name').value = p.name;
+  $('f-url').value = p.url || '';
+  $('f-source').value = p.source || 'url';
+  $('f-message').value = p.message || '';
+  $('f-file').value = '';
+  updateSourceUI();
+  document.querySelector('form button').textContent = '保存修改';
+}
+
+async function uploadFile(uuid) {
+  const fileInput = $('f-file');
+  if (!fileInput.files.length) return;
+  const fd = new FormData();
+  fd.append('file', fileInput.files[0]);
+  await api('/api/providers/' + uuid + '/upload', {method: 'POST', body: fd});
+}
+
+$('add-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const source = $('f-source').value;
+  const url = $('f-url').value.trim();
+  if (source === 'url') {
+    if (!url) {
+      showError('请填写订阅 URL');
+      return;
+    }
+    if (!/^https?:\/\//i.test(url)) {
+      showError('URL 必须是 http(s) 地址');
+      return;
+    }
+  }
+  const body = {
+    name: $('f-name').value,
+    url: url,
+    source: source,
+    message: $('f-message').value,
+  };
+  try {
+    if (editingUuid) {
+      await api('/api/providers/' + editingUuid, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      });
+      await uploadFile(editingUuid);
+    } else {
+      const list = await api('/api/providers', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      });
+      const created = list[list.length - 1];
+      await uploadFile(created.uuid);
+    }
+    editingUuid = null;
+    $('add-form').reset();
+    document.querySelector('form button').textContent = '添加';
+    updateSourceUI();
+    load();
+  } catch (err) {
+    showError('保存失败: ' + err.message);
+  }
+};
+
+async function del(p) {
+  if (!confirm('删除 provider ' + p.name + '？')) return;
+  try {
+    await api('/api/providers/' + p.uuid, {method: 'DELETE'});
+    load();
+  } catch (err) {
+    showError('删除失败: ' + err.message);
+  }
+}
+
+async function fetchSub(p) {
+  if (!confirm('下载并更新 ' + p.name + ' 的订阅？')) return;
+  try {
+    const data = await api('/api/providers/' + p.uuid + '/fetch', {method: 'POST'});
+    showError('下载成功: ' + data.bytes + ' bytes');
+  } catch (err) {
+    showError('下载失败: ' + err.message);
+  }
+}
+
+load();
+</script>
+</body>
+</html>

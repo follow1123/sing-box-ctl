@@ -1,44 +1,113 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
-
-	"github.com/spf13/cobra"
+	"strconv"
+	"strings"
 )
 
 const (
-	Version        = "0.2.0"
+	Version        = "0.3.0"
 	SingBoxVersion = "0.12.x"
 )
 
-const (
-	cmdGrpDefault = "available"
-	cmdGrpWindows = "windows"
-)
-
-var rootFlagVersion bool
-
-var rootCmd = &cobra.Command{
-	Use:   "sbctl",
-	Short: "sing-box helper",
-	Run: func(cmd *cobra.Command, args []string) {
-		if rootFlagVersion {
-			cmd.Printf("version: %s\nsupported sing-box version: %s\n", Version, SingBoxVersion)
-			return
-		}
-		cmd.Help()
-	},
+type options struct {
+	configPath string
+	port       int
+	version    bool
+	command    string
 }
 
 func Execute() {
-	err := rootCmd.Execute()
+	opts, err := parseArgs(os.Args[1:])
 	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		printUsage()
+		os.Exit(1)
+	}
+
+	if opts.version {
+		printVersion()
+		return
+	}
+
+	switch opts.command {
+	case "serve":
+		if opts.configPath == "" {
+			fmt.Fprintln(os.Stderr, "error: -c is required")
+			printUsage()
+			os.Exit(1)
+		}
+		if err := serveCmd(opts.configPath, opts.port); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+	case "version":
+		printVersion()
+	case "":
+		printUsage()
+		os.Exit(1)
+	default:
+		fmt.Fprintf(os.Stderr, "unknown command: %s\n", opts.command)
 		os.Exit(1)
 	}
 }
 
-func init() {
-	rootCmd.Flags().BoolVarP(&rootFlagVersion, "version", "v", false, "print version")
+func parseArgs(args []string) (*options, error) {
+	opts := &options{port: 8080}
 
-	rootCmd.AddGroup(&cobra.Group{ID: cmdGrpDefault, Title: "Available Commands"})
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch arg {
+		case "-c", "--config":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("flag %s requires a value", arg)
+			}
+			i++
+			opts.configPath = args[i]
+		case "-p", "--port":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("flag %s requires a value", arg)
+			}
+			i++
+			port, err := strconv.Atoi(args[i])
+			if err != nil || port <= 0 || port > 65535 {
+				return nil, fmt.Errorf("invalid port: %s", args[i])
+			}
+			opts.port = port
+		case "-v", "--version":
+			opts.version = true
+		case "serve", "version", "help":
+			if opts.command != "" && opts.command != arg {
+				return nil, fmt.Errorf("multiple commands: %s and %s", opts.command, arg)
+			}
+			opts.command = arg
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return nil, fmt.Errorf("unknown flag: %s", arg)
+			}
+			return nil, fmt.Errorf("unknown command: %s", arg)
+		}
+	}
+	return opts, nil
+}
+
+func printVersion() {
+	fmt.Printf("version: %s\nsupported sing-box version: %s\n", Version, SingBoxVersion)
+}
+
+func printUsage() {
+	fmt.Print(`usage: sbctl [flags] <command>
+
+commands:
+  serve    start webui server
+  version  print version
+  help     print this help
+
+flags:
+  -c <path>  path to config file (required for serve)
+  -p <port>  webui port (default 8080)
+  -v         print version
+`)
 }

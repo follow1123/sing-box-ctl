@@ -12,141 +12,160 @@ import (
 func newProvider(t *testing.T) (*provider.Provider, string) {
 	t.Helper()
 	configPath := filepath.Join(t.TempDir(), "config.json")
+	// 写一个含 working_dir 的配置，避免相对路径推导问题
+	workingDir := t.TempDir()
+	content := `{"working_dir": "` + workingDir + `", "providers": []}`
+	require.NoError(t, os.WriteFile(configPath, []byte(content), 0660))
 	p, err := provider.New(configPath)
 	require.NoError(t, err)
 	return p, configPath
 }
 
-func TestInit(t *testing.T) {
-	_, err := provider.New(filepath.Join(t.TempDir(), "config.json"))
-	require.NoError(t, err)
-}
-
 func TestAdd(t *testing.T) {
-	t.Run("add first is default", func(t *testing.T) {
+	t.Run("add success and generate uuid", func(t *testing.T) {
 		p, _ := newProvider(t)
-		require.NoError(t, p.Add("aaa", "http://localhost:8752"))
-		pd := p.Get("aaa")
-		defaultProvider := p.GetDefault()
-		require.Equal(t, pd.Name, defaultProvider.Name)
+		require.NoError(t, p.Add("aaa", "http://localhost:8752", provider.SourceURL, ""))
+		list := p.List()
+		require.Len(t, list, 1)
+		require.NotEmpty(t, list[0].Uuid)
+		require.Equal(t, "aaa", list[0].Name)
+		require.Equal(t, provider.SourceURL, list[0].Source)
 	})
-	t.Run("added later is not the default", func(t *testing.T) {
+
+	t.Run("add with upload source no url", func(t *testing.T) {
 		p, _ := newProvider(t)
-		require.NoError(t, p.Add("aaa", "http://localhost:8752"))
-		require.NoError(t, p.Add("bbb", "http://localhost:8754"))
-		pd := p.Get("bbb")
-		defaultProvider := p.GetDefault()
-		require.NotEqual(t, pd.Name, defaultProvider.Name)
+		require.NoError(t, p.Add("bbb", "", provider.SourceUpload, "upload message"))
+		list := p.List()
+		require.Len(t, list, 1)
+		require.Equal(t, provider.SourceUpload, list[0].Source)
+		require.Equal(t, "upload message", list[0].Message)
+	})
+
+	t.Run("invalid source", func(t *testing.T) {
+		p, _ := newProvider(t)
+		err := p.Add("aaa", "http://localhost:8752", "invalid", "")
+		require.ErrorContains(t, err, "invalid source")
+	})
+
+	t.Run("url required for url source", func(t *testing.T) {
+		p, _ := newProvider(t)
+		err := p.Add("aaa", "", provider.SourceURL, "")
+		require.ErrorContains(t, err, "url is required")
+	})
+
+	t.Run("name required", func(t *testing.T) {
+		p, _ := newProvider(t)
+		err := p.Add("", "http://localhost:8752", provider.SourceURL, "")
+		require.ErrorContains(t, err, "name is required")
 	})
 
 	t.Run("duplicate provider name", func(t *testing.T) {
 		p, _ := newProvider(t)
-		require.NoError(t, p.Add("aaa", "http://localhost:8752"))
-		require.ErrorContains(t, p.Add("aaa", "http://localhost:8752"), "duplicate provider name")
-	})
-}
-
-func TestSetDefault(t *testing.T) {
-	p, _ := newProvider(t)
-	require.NoError(t, p.Add("aaa", "http://localhost:8752"))
-	defProvider := p.GetDefault()
-	require.Equal(t, "aaa", defProvider.Name)
-	require.NoError(t, p.Add("bbb", "http://localhost:8754"))
-	p.SetDefault("bbb")
-	defProvider = p.GetDefault()
-	require.Equal(t, "bbb", defProvider.Name)
-}
-
-func TestDelete(t *testing.T) {
-	t.Run("delete", func(t *testing.T) {
-		p, _ := newProvider(t)
-		require.NoError(t, p.Add("aaa", "http://localhost:8752"))
-		require.NoError(t, p.Add("bbb", "http://localhost:8753"))
-		require.NoError(t, p.Add("ccc", "http://localhost:8754"))
-		require.NoError(t, p.Add("ddd", "http://localhost:8755"))
-		require.NoError(t, p.Delete("ccc"))
-		pds := p.List()
-		require.Equal(t, "aaa", pds[0].Name)
-		require.Equal(t, "bbb", pds[1].Name)
-		require.Equal(t, "ddd", pds[2].Name)
-	})
-	t.Run("delete first if is default", func(t *testing.T) {
-		p, _ := newProvider(t)
-		require.NoError(t, p.Add("aaa", "http://localhost:8752"))
-		require.NoError(t, p.Add("bbb", "http://localhost:8753"))
-		require.NoError(t, p.Add("ccc", "http://localhost:8754"))
-		require.NoError(t, p.Add("ddd", "http://localhost:8755"))
-		require.NoError(t, p.Delete("aaa"))
-		defProvider := p.GetDefault()
-		require.Equal(t, "bbb", defProvider.Name)
-	})
-	t.Run("delete last if is default", func(t *testing.T) {
-		p, _ := newProvider(t)
-		require.NoError(t, p.Add("aaa", "http://localhost:8752"))
-		require.NoError(t, p.Add("bbb", "http://localhost:8753"))
-		require.NoError(t, p.Add("ccc", "http://localhost:8754"))
-		require.NoError(t, p.Add("ddd", "http://localhost:8755"))
-		p.SetDefault("ddd")
-		require.NoError(t, p.Delete("ddd"))
-		defProvider := p.GetDefault()
-		require.Equal(t, "ccc", defProvider.Name)
-	})
-	t.Run("delete last one if is default", func(t *testing.T) {
-		p, _ := newProvider(t)
-		require.NoError(t, p.Add("aaa", "http://localhost:8752"))
-		name := "aaa"
-		require.NoError(t, p.Delete(name))
-		require.Nil(t, p.Get(name))
+		require.NoError(t, p.Add("aaa", "http://localhost:8752", provider.SourceURL, ""))
+		err := p.Add("aaa", "http://localhost:8752", provider.SourceURL, "")
+		require.ErrorContains(t, err, "duplicate provider name")
 	})
 }
 
 func TestUpdate(t *testing.T) {
-	t.Run("update", func(t *testing.T) {
-		p, configPath := newProvider(t)
-		err := os.WriteFile(configPath, []byte(`{"providers":[{"name": "aaa","url":"http://localhost:8903"}]}`), 0660)
-		require.NoError(t, err)
-		p, err = provider.New(configPath)
-		require.NoError(t, err)
-		name := "aaa"
-		newUrl := "http://localhost:8752"
-		err = p.Update(name, newUrl)
-		require.NoError(t, err)
-		data := p.Get(name)
-		require.Equal(t, newUrl, data.Url)
+	p, _ := newProvider(t)
+	require.NoError(t, p.Add("aaa", "http://localhost:8752", provider.SourceURL, ""))
+	uuid := p.List()[0].Uuid
+
+	require.NoError(t, p.Update(uuid, "aaa2", "http://localhost:8753", provider.SourceUpload, "new msg"))
+	prov := p.Get(uuid)
+	require.Equal(t, "aaa2", prov.Name)
+	require.Equal(t, "http://localhost:8753", prov.Url)
+	require.Equal(t, provider.SourceUpload, prov.Source)
+	require.Equal(t, "new msg", prov.Message)
+
+	t.Run("update unknown uuid", func(t *testing.T) {
+		err := p.Update("unknown", "x", "http://x", provider.SourceURL, "")
+		require.ErrorContains(t, err, "no provider with uuid")
 	})
-	t.Run("no providers", func(t *testing.T) {
-		p, _ := newProvider(t)
-		err := p.Update("aaa", "http://localhost:8752")
-		require.ErrorContains(t, err, "no provider")
-	})
+}
+
+func TestDelete(t *testing.T) {
+	p, _ := newProvider(t)
+	require.NoError(t, p.Add("aaa", "http://localhost:8752", provider.SourceURL, ""))
+	require.NoError(t, p.Add("bbb", "http://localhost:8753", provider.SourceURL, ""))
+	uuid := p.List()[0].Uuid
+
+	require.NoError(t, p.Delete(uuid))
+	require.Len(t, p.List(), 1)
+	require.Nil(t, p.Get(uuid))
+
+	// 删除不存在的 uuid 不报错
+	require.NoError(t, p.Delete("unknown"))
 }
 
 func TestGet(t *testing.T) {
-	t.Run("get", func(t *testing.T) {
-		p, configPath := newProvider(t)
-		err := os.WriteFile(configPath, []byte(`{"providers":[{"name": "aaa","url":"http://localhost:8903"}]}`), 0660)
-		require.NoError(t, err)
-		p, err = provider.New(configPath)
-		require.NoError(t, err)
-		data := p.Get("aaa")
-		require.Equal(t, "aaa", data.Name)
-		require.Equal(t, "http://localhost:8903", data.Url)
-	})
-	t.Run("no providers", func(t *testing.T) {
-		p, _ := newProvider(t)
-		require.Nil(t, p.Get("aaa"))
-	})
+	p, _ := newProvider(t)
+	require.NoError(t, p.Add("aaa", "http://localhost:8752", provider.SourceURL, ""))
+	uuid := p.List()[0].Uuid
+	require.Equal(t, "aaa", p.Get(uuid).Name)
+	require.Nil(t, p.Get("unknown"))
 }
 
-func TestList(t *testing.T) {
+func TestSave(t *testing.T) {
+	p, configPath := newProvider(t)
+	require.NoError(t, p.Add("aaa", "http://localhost:8752", provider.SourceURL, ""))
+	require.NoError(t, p.Save())
+
+	// 重新加载，验证持久化
+	p2, err := provider.New(configPath)
+	require.NoError(t, err)
+	require.Len(t, p2.List(), 1)
+	require.Equal(t, "aaa", p2.List()[0].Name)
+	require.NotEmpty(t, p2.List()[0].Uuid)
+}
+
+func TestSaveSubscription(t *testing.T) {
 	p, _ := newProvider(t)
-	require.NoError(t, p.Add("aaa", "http://localhost:8752"))
-	require.NoError(t, p.Add("bbb", "http://localhost:8753"))
-	require.NoError(t, p.Add("ccc", "http://localhost:8754"))
-	require.NoError(t, p.Add("ddd", "http://localhost:8755"))
-	pds := p.List()
-	require.Equal(t, "aaa", pds[0].Name)
-	require.Equal(t, "bbb", pds[1].Name)
-	require.Equal(t, "ccc", pds[2].Name)
-	require.Equal(t, "ddd", pds[3].Name)
+	require.NoError(t, p.Add("aaa", "http://localhost:8752", provider.SourceURL, ""))
+	uuid := p.List()[0].Uuid
+	dir := p.SubscriptionDir(uuid)
+
+	// 第一次保存
+	require.NoError(t, p.SaveSubscription(uuid, []byte("data1")))
+	require.FileExists(t, filepath.Join(dir, "current"))
+	require.NoFileExists(t, filepath.Join(dir, "last"))
+
+	// 第二次：current→last
+	require.NoError(t, p.SaveSubscription(uuid, []byte("data2")))
+	assertFileContent(t, filepath.Join(dir, "current"), "data2")
+	assertFileContent(t, filepath.Join(dir, "last"), "data1")
+	require.NoFileExists(t, filepath.Join(dir, "old"))
+
+	// 第三次：current→last→old 滚动
+	require.NoError(t, p.SaveSubscription(uuid, []byte("data3")))
+	assertFileContent(t, filepath.Join(dir, "current"), "data3")
+	assertFileContent(t, filepath.Join(dir, "last"), "data2")
+	assertFileContent(t, filepath.Join(dir, "old"), "data1")
+
+	// 第四次：old 被覆盖丢弃
+	require.NoError(t, p.SaveSubscription(uuid, []byte("data4")))
+	assertFileContent(t, filepath.Join(dir, "current"), "data4")
+	assertFileContent(t, filepath.Join(dir, "last"), "data3")
+	assertFileContent(t, filepath.Join(dir, "old"), "data2")
+}
+
+func TestReadSubscription(t *testing.T) {
+	p, _ := newProvider(t)
+	require.NoError(t, p.Add("aaa", "http://localhost:8752", provider.SourceURL, ""))
+	uuid := p.List()[0].Uuid
+	require.NoError(t, p.SaveSubscription(uuid, []byte("hello")))
+	data, err := p.ReadSubscription(uuid)
+	require.NoError(t, err)
+	require.Equal(t, "hello", string(data))
+
+	_, err = p.ReadSubscription("unknown")
+	require.Error(t, err)
+}
+
+func assertFileContent(t *testing.T, path string, expected string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, expected, string(data))
 }
