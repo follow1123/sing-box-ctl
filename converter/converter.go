@@ -68,45 +68,58 @@ func convertNodes(proxies []Proxy) ([]map[string]any, []string) {
 			ob["server_port"] = p.Port
 			ob["method"] = p.Cipher
 			ob["password"] = p.Password
-			if p.Udp {
-				ob["network"] = "udp"
-			} else {
-				ob["network"] = "tcp"
+			setNetwork(ob, p)
+		case "vmess":
+			ob["type"] = "vmess"
+			ob["tag"] = p.Name
+			ob["server"] = p.Server
+			ob["server_port"] = p.Port
+			ob["uuid"] = p.Uuid
+			if p.AlterId > 0 {
+				ob["alter_id"] = p.AlterId
 			}
+			ob["security"] = p.Cipher
+			if ob["security"] == "" {
+				ob["security"] = "auto"
+			}
+			if p.Tls {
+				ob["tls"] = buildTls(p)
+			}
+			if p.Network == "ws" || p.WsOpts != nil {
+				ob["transport"] = buildWsTransport(p)
+			}
+			setNetwork(ob, p)
+		case "vless":
+			ob["type"] = "vless"
+			ob["tag"] = p.Name
+			ob["server"] = p.Server
+			ob["server_port"] = p.Port
+			ob["uuid"] = p.Uuid
+			if p.Flow != "" {
+				ob["flow"] = p.Flow
+			}
+			if p.Tls {
+				ob["tls"] = buildTls(p)
+			}
+			if p.Network == "ws" || p.WsOpts != nil {
+				ob["transport"] = buildWsTransport(p)
+			}
+			setNetwork(ob, p)
 		case "trojan":
 			ob["type"] = "trojan"
 			ob["tag"] = p.Name
 			ob["server"] = p.Server
 			ob["server_port"] = p.Port
 			ob["password"] = p.Password
-			tls := make(map[string]any)
-			tls["enabled"] = true
-			tls["insecure"] = p.SkipCertVerify
-			tls["server_name"] = p.Sni
-			ob["tls"] = tls
-
-			if p.Udp {
-				ob["network"] = "udp"
-			} else {
-				ob["network"] = "tcp"
-			}
+			ob["tls"] = buildTls(p)
+			setNetwork(ob, p)
 		case "anytls":
 			ob["type"] = "anytls"
 			ob["tag"] = p.Name
 			ob["server"] = p.Server
 			ob["server_port"] = p.Port
 			ob["password"] = p.Password
-			tls := make(map[string]any)
-			tls["enabled"] = true
-			tls["insecure"] = p.SkipCertVerify
-			tls["server_name"] = p.Sni
-			tls["alpn"] = p.Alpn
-			utls := make(map[string]any)
-			utls["enabled"] = true
-			utls["fingerprint"] = p.ClientFingerprint
-			tls["utls"] = utls
-
-			ob["tls"] = tls
+			ob["tls"] = buildTls(p)
 		default:
 			fmt.Printf("unsupport protocol: %v\n", p.Type)
 			continue
@@ -115,6 +128,45 @@ func convertNodes(proxies []Proxy) ([]map[string]any, []string) {
 		names = append(names, p.Name)
 	}
 	return outbounds, names
+}
+
+// buildTls 构造 tls 配置
+func buildTls(p Proxy) map[string]any {
+	tls := map[string]any{
+		"enabled":     true,
+		"insecure":    p.SkipCertVerify,
+		"server_name": p.Sni,
+	}
+	if len(p.Alpn) > 0 {
+		tls["alpn"] = p.Alpn
+	}
+	if p.ClientFingerprint != "" {
+		tls["utls"] = map[string]any{"enabled": true, "fingerprint": p.ClientFingerprint}
+	}
+	return tls
+}
+
+// buildWsTransport 构造 ws 传输层配置
+func buildWsTransport(p Proxy) map[string]any {
+	ws := map[string]any{"type": "ws"}
+	if p.WsOpts != nil {
+		if p.WsOpts.Path != "" {
+			ws["path"] = p.WsOpts.Path
+		}
+		if len(p.WsOpts.Headers) > 0 {
+			ws["headers"] = p.WsOpts.Headers
+		}
+	}
+	return ws
+}
+
+// setNetwork 根据 udp 标记设置 network 字段
+func setNetwork(ob map[string]any, p Proxy) {
+	if p.Udp {
+		ob["network"] = "udp"
+	} else {
+		ob["network"] = "tcp"
+	}
 }
 
 // resolveOutboundExpr 处理 outbound tag 中的 @ 表达式：

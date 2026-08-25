@@ -10,6 +10,8 @@ type Proxy struct {
 	Name              string   `yaml:"name"`
 	Server            string   `yaml:"server"`
 	Port              int      `yaml:"port"`
+	Uuid              string   `yaml:"uuid"`
+	AlterId           int      `yaml:"alterId"`
 	Password          string   `yaml:"password"`
 	Cipher            string   `yaml:"cipher"`
 	Udp               bool     `yaml:"udp"`
@@ -17,4 +19,13 @@ type Proxy struct {
 	SkipCertVerify    bool     `yaml:"skip-cert-verify"`
 	ClientFingerprint string   `yaml:"client-fingerprint"`
 	Alpn              []string `yaml:"alpn"`
+	Tls               bool     `yaml:"tls"`
+	Network           string   `yaml:"network"`
+	Flow              string   `yaml:"flow"`
+	WsOpts            *WsOpts  `yaml:"ws-opts"`
+}
+
+type WsOpts struct {
+	Path    string            `yaml:"path"`
+	Headers map[string]string `yaml:"headers"`
 }
