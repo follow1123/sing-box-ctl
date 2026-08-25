@@ -68,24 +68,30 @@ func TemplateData() []byte {
 	return singboxTemplateConfigData
 }
 
-// initDefaultTemplate 没有模板时，创建默认模板（uuid 目录 + name + default 标记 + 内嵌内容）
+// initDefaultTemplate 没有模板时创建默认模板；有模板但无 default 标记时补第一个为默认
 func initDefaultTemplate(p *provider.Provider) error {
 	infos, err := p.ListTemplates()
 	if err != nil {
 		return fmt.Errorf("list templates error:\n\t%w", err)
 	}
-	if len(infos) > 0 {
+	if len(infos) == 0 {
+		uuid, err := p.AddTemplate("默认模板")
+		if err != nil {
+			return fmt.Errorf("init default template error:\n\t%w", err)
+		}
+		if err := p.SaveTemplate(uuid, singboxTemplateConfigData); err != nil {
+			return fmt.Errorf("init default template content error:\n\t%w", err)
+		}
+		if err := p.SetDefaultTemplate(uuid); err != nil {
+			return fmt.Errorf("init default template mark error:\n\t%w", err)
+		}
 		return nil
 	}
-	uuid, err := p.AddTemplate("默认模板")
-	if err != nil {
-		return fmt.Errorf("init default template error:\n\t%w", err)
+	// 有模板但没有任何 default 标记时，把第一个设为默认
+	for _, info := range infos {
+		if info.Default {
+			return nil
+		}
 	}
-	if err := p.SaveTemplate(uuid, singboxTemplateConfigData); err != nil {
-		return fmt.Errorf("init default template content error:\n\t%w", err)
-	}
-	if err := p.SetDefaultTemplate(uuid); err != nil {
-		return fmt.Errorf("init default template mark error:\n\t%w", err)
-	}
-	return nil
+	return p.SetDefaultTemplate(infos[0].Uuid)
 }
