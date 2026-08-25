@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"slices"
 	"strconv"
 
@@ -32,36 +31,17 @@ const (
 	PlatformAndroid Platform = "android"
 )
 
+// Settings 基于模板配置 + 转换后的配置，在内存中应用 URL 参数
 type Settings struct {
 	tmplConf *C.SingBox
 	conf     *C.SingBox
-	confPath string
 }
 
-func NewSettings(configPath string) (*Settings, error) {
-	var conf *C.SingBox = nil
-
-	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
-		conf, err = C.LoadSingboxFromPath(configPath)
-		if err != nil {
-			return nil, fmt.Errorf("load config error:\n\t%w", err)
-		}
-	}
-	return &Settings{conf: conf, confPath: configPath}, nil
-}
-
-func (s *Settings) SetTemplateConfigDate(tmplConfig *C.SingBox) {
-	s.tmplConf = tmplConfig
-}
-
-func (s *Settings) SetTemplateConfig(tmplConfigPath string) error {
-	tmplConf, err := C.LoadSingboxFromPath(tmplConfigPath)
-	if err != nil {
-		return fmt.Errorf("load template config error:\n\t%w", err)
-	}
-
-	s.tmplConf = tmplConf
-	return nil
+// New 构建设置器。tmplConf 为模板原始配置（提供默认 mixed/tun inbound、clash_api）；
+// conf 为订阅转换后的配置（将被修改）。webui（clash_api）默认禁用，需要时通过 Set 启用。
+func New(tmplConf *C.SingBox, conf *C.SingBox) *Settings {
+	conf.Experimental.ClashAPI = nil
+	return &Settings{tmplConf: tmplConf, conf: conf}
 }
 
 func (s *Settings) SetMap(values map[SettingName]string) error {
@@ -108,12 +88,14 @@ func (s *Settings) Set(name SettingName, value string) error {
 			if idx < 0 {
 				defaultIdx := indexOfInboundType(s.tmplConf, "mixed")
 				if defaultIdx < 0 {
-					panic("no default mixed inbound config in template config")
+					return fmt.Errorf("no default mixed inbound config in template config")
 				}
-				s.conf.Inbounds = append(s.conf.Inbounds, s.tmplConf.Inbounds[defaultIdx])
+				s.conf.Inbounds = append(s.conf.Inbounds, cloneInbound(s.tmplConf.Inbounds[defaultIdx]))
 			}
 		} else {
-			s.conf.Inbounds = slices.Delete(s.conf.Inbounds, idx, idx+1)
+			if idx >= 0 {
+				s.conf.Inbounds = slices.Delete(s.conf.Inbounds, idx, idx+1)
+			}
 		}
 	case StMixedPort:
 		port, err := strconv.ParseUint(value, 10, 16)
@@ -152,9 +134,9 @@ func (s *Settings) Set(name SettingName, value string) error {
 			if idx < 0 {
 				defaultIdx := indexOfInboundType(s.tmplConf, "tun")
 				if defaultIdx < 0 {
-					panic("no default tun inbound config in template config")
+					return fmt.Errorf("no default tun inbound config in template config")
 				}
-				s.conf.Inbounds = append(s.conf.Inbounds, s.tmplConf.Inbounds[defaultIdx])
+				s.conf.Inbounds = append(s.conf.Inbounds, cloneInbound(s.tmplConf.Inbounds[defaultIdx]))
 			}
 		} else {
 			if idx >= 0 {
@@ -274,17 +256,21 @@ func (s *Settings) initMixedSettings() int {
 
 	idx := indexOfInboundType(s.conf, "mixed")
 	if idx < 0 {
-		s.conf.Inbounds = append(s.conf.Inbounds, s.tmplConf.Inbounds[defaultIdx])
+		s.conf.Inbounds = append(s.conf.Inbounds, cloneInbound(s.tmplConf.Inbounds[defaultIdx]))
 		return len(s.conf.Inbounds) - 1
 	}
 	return idx
 }
 
 func (s *Settings) initWebuiSettings() {
-	// clash_api 为空或  external_controller 为空表示禁用状态
-	// 使用默认配置启用
+	// clash_api 为空或 external_controller 为空表示禁用状态
+	// 优先复制模板中的配置，模板没有时构造空结构
 	if s.conf.Experimental.ClashAPI == nil || s.conf.Experimental.ClashAPI.ExternalController == "" {
-		s.conf.Experimental.ClashAPI = s.tmplConf.Experimental.ClashAPI
+		if s.tmplConf.Experimental.ClashAPI != nil {
+			s.conf.Experimental.ClashAPI = cloneClashAPI(s.tmplConf.Experimental.ClashAPI)
+		} else {
+			s.conf.Experimental.ClashAPI = &C.ClashAPI{}
+		}
 	}
 }
 
@@ -296,7 +282,7 @@ func (s *Settings) SetPlatform(platform Platform) error {
 			s.conf.Inbounds[inboundIdx]["stack"] = "gvisor"
 		}
 	case PlatformLinux:
-		if inboundIdx > 0 {
+		if inboundIdx >= 0 {
 			s.conf.Inbounds[inboundIdx]["auto_route"] = true
 			s.conf.Inbounds[inboundIdx]["auto_redirect"] = true
 		}
@@ -329,36 +315,6 @@ func (s *Settings) ToJson(format bool) ([]byte, error) {
 	return data, nil
 }
 
-func (s *Settings) Save(format bool) error {
-	data, err := s.ToJson(format)
-	if err != nil {
-		return err
-	}
-
-	if err := os.WriteFile(s.confPath, data, 0660); err != nil {
-		panic(fmt.Errorf("write config data to file %s error:\n\t%w", s.confPath, err))
-	}
-	return nil
-}
-
-func (s *Settings) UpdateFrom(newConfig *C.SingBox) error {
-	if s.conf != nil {
-		newConfig.Experimental.ClashAPI = s.conf.Experimental.ClashAPI
-		newConfig.Inbounds = s.conf.Inbounds
-	}
-	s.conf = newConfig
-	return nil
-}
-
-func (s *Settings) Update() error {
-	conf, err := C.LoadSingboxFromPath(s.confPath)
-	if err != nil {
-		return fmt.Errorf("update config error:\n\t%w", err)
-	}
-	s.conf = conf
-	return nil
-}
-
 func (s *Settings) GetConfig() *C.SingBox {
 	return s.conf
 }
@@ -370,4 +326,33 @@ func indexOfInboundType(sb *C.SingBox, inboundType string) int {
 		}
 	}
 	return -1
+}
+
+// cloneInbound 深拷贝 inbound，避免修改污染模板配置
+func cloneInbound(inb map[string]any) map[string]any {
+	data, err := json.Marshal(inb)
+	if err != nil {
+		return inb
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		return inb
+	}
+	return out
+}
+
+// cloneClashAPI 深拷贝 clash_api 配置
+func cloneClashAPI(src *C.ClashAPI) *C.ClashAPI {
+	if src == nil {
+		return nil
+	}
+	data, err := json.Marshal(src)
+	if err != nil {
+		return &C.ClashAPI{}
+	}
+	var out C.ClashAPI
+	if err := json.Unmarshal(data, &out); err != nil {
+		return &C.ClashAPI{}
+	}
+	return &out
 }
