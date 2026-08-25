@@ -11,12 +11,14 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 
 	"github.com/follow1123/sing-box-ctl/config"
 	"github.com/follow1123/sing-box-ctl/converter"
 	"github.com/follow1123/sing-box-ctl/provider"
+	"github.com/follow1123/sing-box-ctl/settings"
 )
 
 //go:embed index.html
@@ -410,7 +412,7 @@ func (s *Server) templateHandle(w http.ResponseWriter, r *http.Request) {
 
 // ================= config API =================
 
-// GET /config/<uuid>?template=<template-uuid> -> 实时转换订阅为 sing-box 配置
+// GET /config/<uuid>?template=<template-uuid>&platform=&tun&mixed&... -> 实时转换订阅为 sing-box 配置
 func (s *Server) configHandle(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -452,8 +454,20 @@ func (s *Server) configHandle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 实时转换
-	conv, err := converter.New(p.TemplateDir(template))
+	// 读取模板原始配置（settings 需要默认 mixed/tun inbound、clash_api）
+	tmplData, err := p.ReadTemplate(template)
+	if err != nil {
+		handleError(w, err, http.StatusNotFound)
+		return
+	}
+	tmplConf := &converter.SingBox{}
+	if err := json.Unmarshal(tmplData, tmplConf); err != nil {
+		handleError(w, fmt.Errorf("parse template error: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// 实时转换订阅为 sing-box 配置
+	conv, err := converter.New(filepath.Join(p.TemplateDir(template), "current"))
 	if err != nil {
 		handleInternalServerError(w, err)
 		return
@@ -463,13 +477,59 @@ func (s *Server) configHandle(w http.ResponseWriter, r *http.Request) {
 		handleError(w, err, http.StatusBadRequest)
 		return
 	}
-	jsonData, err := json.MarshalIndent(sb, "", "  ")
+
+	// 解析 URL 参数并应用到转换结果（内存中，无中间文件）
+	values, err := parseConfigQuery(r.URL.Query())
+	if err != nil {
+		handleError(w, err, http.StatusBadRequest)
+		return
+	}
+	st := settings.New(tmplConf, sb)
+	if err := st.SetMap(values); err != nil {
+		handleError(w, err, http.StatusBadRequest)
+		return
+	}
+	if platform := r.URL.Query().Get("platform"); platform != "" {
+		if err := st.SetPlatform(platform); err != nil {
+			handleError(w, err, http.StatusBadRequest)
+			return
+		}
+	}
+
+	jsonData, err := st.ToJson(true)
 	if err != nil {
 		handleInternalServerError(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Write(jsonData)
+}
+
+// parseConfigQuery 将 URL 查询参数映射为 settings 设置项
+func parseConfigQuery(q url.Values) (map[settings.SettingName]string, error) {
+	values := make(map[settings.SettingName]string)
+	if _, ok := q["tun"]; ok {
+		values[settings.StTunStatus] = "true"
+	}
+	if _, ok := q["mixed"]; ok {
+		values[settings.StMixedStatus] = "true"
+	}
+	if v := q.Get("mixed-port"); v != "" {
+		values[settings.StMixedPort] = v
+	}
+	if _, ok := q["sys-proxy"]; ok {
+		values[settings.StMixedSysProxyStatus] = "true"
+	}
+	if _, ok := q["share"]; ok {
+		values[settings.StMixedShareStatus] = "true"
+	}
+	if v := q.Get("webui-port"); v != "" {
+		values[settings.StWebuiPort] = v
+	}
+	if v := q.Get("webui-secret"); v != "" {
+		values[settings.StWebuiSecret] = v
+	}
+	return values, nil
 }
 
 // defaultTemplateData 返回默认模板内容（从 config 包 embed 数据）
