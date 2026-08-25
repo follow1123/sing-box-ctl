@@ -27,16 +27,20 @@ var indexHtml string
 //go:embed template.html
 var templateHtml string
 
+//go:embed url.html
+var urlHtml string
+
 //go:embed static/*
 var staticFiles embed.FS
 
 const (
-	homeUrlPath     = "/"
+	homeUrlPath      = "/"
 	templatesUrlPath = "/templates"
-	apiPath         = "/api/providers"
+	urlPagePath      = "/url"
+	apiPath          = "/api/providers"
 	apiTemplatesPath = "/api/templates"
-	configPathURL   = "/config/"
-	staticUrlPath   = "/static/"
+	configPathURL    = "/config/"
+	staticUrlPath    = "/static/"
 )
 
 type Server struct {
@@ -55,6 +59,7 @@ func New(configPath string, port int) (*Server, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc(homeUrlPath, s.homeHandle)
 	mux.HandleFunc(templatesUrlPath, s.templatesPageHandle)
+	mux.HandleFunc(urlPagePath, s.urlPageHandle)
 	mux.HandleFunc(apiPath, s.providersHandle)
 	mux.HandleFunc(apiPath+"/", s.providerHandle)
 	mux.HandleFunc(apiTemplatesPath, s.templatesHandle)
@@ -118,6 +123,15 @@ func (s *Server) templatesPageHandle(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(templateHtml))
+}
+
+func (s *Server) urlPageHandle(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != urlPagePath {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(urlHtml))
 }
 
 // ================= provider API =================
@@ -261,7 +275,7 @@ func (s *Server) uploadHandle(w http.ResponseWriter, r *http.Request, p *provide
 		handleError(w, fmt.Errorf("parse multipart form error:\n\t%w", err), http.StatusBadRequest)
 		return
 	}
-	file, _, err := r.FormFile("file")
+	file, header, err := r.FormFile("file")
 	if err != nil {
 		handleError(w, fmt.Errorf("get file from form error:\n\t%w", err), http.StatusBadRequest)
 		return
@@ -281,8 +295,14 @@ func (s *Server) uploadHandle(w http.ResponseWriter, r *http.Request, p *provide
 		handleInternalServerError(w, err)
 		return
 	}
+	// 记录上传文件名
+	prov.FileName = header.Filename
+	if err := p.Save(); err != nil {
+		handleInternalServerError(w, err)
+		return
+	}
 	log.Printf("provider '%s' subscription uploaded: %d bytes", prov.Name, len(data))
-	writeJSON(w, map[string]any{"ok": true, "bytes": len(data)})
+	writeJSON(w, map[string]any{"ok": true, "bytes": len(data), "file_name": prov.FileName})
 }
 
 // ================= template API =================

@@ -156,6 +156,10 @@ func (p *Provider) Update(uuid string, name string, url string, source string, m
 	p.config.Providers[idx].Url = url
 	p.config.Providers[idx].Source = source
 	p.config.Providers[idx].Message = message
+	// source 切回 url 时清空上传文件名
+	if source != SourceUpload {
+		p.config.Providers[idx].FileName = ""
+	}
 	return nil
 }
 
