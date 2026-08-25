@@ -1,30 +1,4 @@
 {
-  "custom": {
-    "default_inbound_index": 0,
-    "node_selection_group_name": "节点选择",
-    "auto_selection_group_name": "自动选择",
-    "direct_group_name": "直连",
-    "escape_group_name": "漏网之鱼",
-    "direct_dns_server": "dns-ali",
-    "proxy_dns_server": "dns-google",
-    "direct_rule_keywords": ["直连", "direct", "绕过代理"],
-    "direct_ruleset_index_in_dns": 2,
-    "proxy_ruleset_index_in_dns": 3,
-    "direct_ruleset_index_in_route": 8,
-    "proxy_ruleset_index_in_route": 9,
-    "selectors": [
-      {
-        "tag": "OPENAI",
-        "type": "selector",
-        "keywords": ["台湾"]
-      },
-      {
-        "tag": "MICROSOFT",
-        "type": "selector",
-        "default": "直连"
-      }
-    ]
-  },
   "log": {
     "disabled": false,
     "level": "info",
@@ -97,7 +71,43 @@
       "auto_route": true
     }
   ],
-  "outbounds": [],
+  "outbounds": [
+    {
+      "tag": "节点选择@all",
+      "type": "selector",
+      "outbounds": ["自动选择"]
+    },
+    {
+      "tag": "自动选择@all",
+      "type": "urltest",
+      "outbounds": []
+    },
+    {
+      "tag": "直连",
+      "type": "direct"
+    },
+    {
+      "tag": "漏网之鱼",
+      "type": "selector",
+      "interrupt_exist_connections": true,
+      "outbounds": ["节点选择", "直连"],
+      "default": "节点选择"
+    },
+    {
+      "tag": "OPENAI@keywords=台湾,tw,TW",
+      "type": "selector",
+      "interrupt_exist_connections": true,
+      "outbounds": ["直连", "自动选择", "节点选择"],
+      "default": "自动选择"
+    },
+    {
+      "tag": "MICROSOFT",
+      "type": "selector",
+      "interrupt_exist_connections": true,
+      "outbounds": ["直连", "自动选择", "节点选择"],
+      "default": "直连"
+    }
+  ],
   "route": {
     "rules": [
       { "action": "sniff" },

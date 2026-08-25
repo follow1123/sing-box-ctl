@@ -4,15 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"slices"
 	"strings"
 
 	"github.com/goccy/go-yaml"
 )
 
 type Converter struct {
-	tmpl   *SingBox
-	custom *Custom
+	tmpl *SingBox
 }
 
 func New(singboxTemplateConfigPath string) (*Converter, error) {
@@ -20,95 +18,47 @@ func New(singboxTemplateConfigPath string) (*Converter, error) {
 	if err != nil {
 		return nil, err
 	}
-	custom := tmplConf.Custom
-	// 清空自定义配置，防止生成到最终配置内
-	tmplConf.Custom = nil
-	return &Converter{tmpl: tmplConf, custom: custom}, nil
+	return &Converter{tmpl: tmplConf}, nil
 }
 
+// Convert 将 clash 订阅转换为 sing-box 配置：
+//   - 只解析订阅中的节点（proxies），不解析订阅规则（rules）
+//   - 模板的 dns/route/rule_set 原样保留
+//   - inbounds 只保留第一个
+//   - outbounds 中 tag 含 @ 表达式的组会被填充节点（见 resolveOutboundExpr）
 func (c *Converter) Convert(clashData []byte) (*SingBox, error) {
 	clash := &Clash{}
 	if err := yaml.Unmarshal(clashData, clash); err != nil {
 		return nil, fmt.Errorf("unmarshal clash yaml config error:\n\t%w", err)
 	}
 
-	if err := c.convertOutbounds(clash); err != nil {
-		return nil, fmt.Errorf("convert clash proxy to sing-box outbound error:\n\t%w", err)
+	// 生成节点 outbounds
+	nodeOutbounds, nodeNames := convertNodes(clash.Proxies)
+	if len(nodeNames) == 0 {
+		return nil, fmt.Errorf("no valid proxies in subscription")
 	}
-	if err := c.convertRules(clash); err != nil {
-		return nil, fmt.Errorf("convert clash rule to sing-box rule error:\n\t%w", err)
+
+	// inbounds 只保留第一个（模板中默认的放第一个）
+	if len(c.tmpl.Inbounds) == 0 {
+		return nil, fmt.Errorf("template has no inbounds")
 	}
-	c.tmpl.Inbounds = []map[string]any{c.tmpl.Inbounds[c.custom.DefaultInboundIndex]}
+	c.tmpl.Inbounds = c.tmpl.Inbounds[:1]
+
+	// 填充 outbounds 中的 @ 表达式组
+	for _, ob := range c.tmpl.Outbounds {
+		resolveOutboundExpr(ob, nodeNames)
+	}
+
+	// 最终 outbounds = 订阅节点 + 模板分组
+	c.tmpl.Outbounds = append(nodeOutbounds, c.tmpl.Outbounds...)
 	return c.tmpl, nil
 }
 
-func (c *Converter) convertRules(clash *Clash) error {
-	c.tmpl.DNS.Rules = slices.Insert(c.tmpl.DNS.Rules, c.custom.DirectRuleSetIndexInDNS, map[string]any{
-		"rule_set": "providers_default_direct_rules", "server": c.custom.DirectDNSServer,
-	})
-	c.tmpl.DNS.Rules = slices.Insert(c.tmpl.DNS.Rules, c.custom.ProxyRuleSetIndexInDNS, map[string]any{
-		"rule_set": "providers_default_proxy_rules", "server": c.custom.ProxyDNSServer,
-	})
-
-	routeDirectRuleSet := make(map[string]any, 0)
-	routeProxyRuleSet := make(map[string]any, 0)
-
-	c.tmpl.Route.Rules = slices.Insert(c.tmpl.Route.Rules, c.custom.DirectRuleSetIndexInRoute, map[string]any{
-		"rule_set": "providers_default_direct_rules", "outbound": "直连",
-	})
-	c.tmpl.Route.Rules = slices.Insert(c.tmpl.Route.Rules, c.custom.ProxyRuleSetIndexInRoute, map[string]any{
-		"rule_set": "providers_default_proxy_rules", "outbound": "节点选择",
-	})
-	c.tmpl.Route.RuleSet = append(
-		c.tmpl.Route.RuleSet,
-		map[string]any{"type": "inline", "tag": "providers_default_direct_rules", "rules": [1]map[string]any{routeDirectRuleSet}},
-		map[string]any{"type": "inline", "tag": "providers_default_proxy_rules", "rules": [1]map[string]any{routeProxyRuleSet}},
-	)
-
-	for _, r := range clash.Rules {
-		items := strings.Split(r, ",")
-
-		if len(items) < 3 {
-			fmt.Printf("ignore rule：%v\n", r)
-			continue
-		}
-
-		name, err := ruleType(items[0])
-		if err != nil {
-			fmt.Print(err)
-			continue
-		}
-
-		value := items[1]
-		outbound := items[2]
-		if isDirect(outbound, c.custom.DirectRuleKeywords) {
-			valueList, exists := routeDirectRuleSet[name]
-			if exists {
-				if valueList, ok := valueList.([]any); ok {
-					routeDirectRuleSet[name] = append(valueList, value)
-				}
-			} else {
-				routeDirectRuleSet[name] = []any{value}
-			}
-		} else {
-			valueList, exists := routeProxyRuleSet[name]
-			if exists {
-				if valueList, ok := valueList.([]any); ok {
-					routeProxyRuleSet[name] = append(valueList, value)
-				}
-			} else {
-				routeProxyRuleSet[name] = []any{value}
-			}
-		}
-	}
-	return nil
-}
-
-// 转换节点
-func (c *Converter) convertOutbounds(clash *Clash) error {
-	outboundNames := make([]string, 0)
-	c.tmpl.Outbounds = make([]map[string]any, 0)
-	for _, p := range clash.Proxies {
+// convertNodes 将 clash 节点转换为 sing-box outbound
+func convertNodes(proxies []Proxy) ([]map[string]any, []string) {
+	outbounds := make([]map[string]any, 0)
+	names := make([]string, 0)
+	for _, p := range proxies {
 		ob := make(map[string]any)
 		switch p.Type {
 		case "ss":
@@ -161,97 +111,65 @@ func (c *Converter) convertOutbounds(clash *Clash) error {
 			fmt.Printf("unsupport protocol: %v\n", p.Type)
 			continue
 		}
-		c.tmpl.Outbounds = append(c.tmpl.Outbounds, ob)
-		outboundNames = append(outboundNames, p.Name)
+		outbounds = append(outbounds, ob)
+		names = append(names, p.Name)
 	}
-
-	c.tmpl.Outbounds = append(c.tmpl.Outbounds, map[string]any{
-		"type":                        "selector",
-		"tag":                         c.custom.NodeSelectionGroupName,
-		"interrupt_exist_connections": true,
-		"outbounds":                   append([]string{c.custom.AutoSelectionGroupName}, outboundNames...),
-	})
-
-	c.tmpl.Outbounds = append(c.tmpl.Outbounds, map[string]any{
-		"type":                        "urltest",
-		"tag":                         c.custom.AutoSelectionGroupName,
-		"interrupt_exist_connections": true,
-		"interval":                    "10m",
-		"outbounds":                   outboundNames,
-	})
-
-	for _, s := range c.custom.OutboundSelectors {
-		ob := map[string]any{
-			"type":                        s.SelectorType,
-			"tag":                         s.Tag,
-			"interrupt_exist_connections": true,
-			"outbounds": append(
-				filterOutbound(outboundNames, s.Keywords),
-				c.custom.DirectGroupName,
-				c.custom.AutoSelectionGroupName,
-				c.custom.NodeSelectionGroupName,
-			),
-		}
-		if s.DefaultOutbound != "" {
-			ob["default"] = s.DefaultOutbound
-		}
-		c.tmpl.Outbounds = append(c.tmpl.Outbounds, ob)
-	}
-
-	c.tmpl.Outbounds = append(c.tmpl.Outbounds, map[string]any{
-		"type": "direct",
-		"tag":  c.custom.DirectGroupName,
-	})
-
-	c.tmpl.Outbounds = append(c.tmpl.Outbounds, map[string]any{
-		"type":                        "selector",
-		"tag":                         c.custom.EscapeGroupName,
-		"interrupt_exist_connections": true,
-		"outbounds":                   []string{c.custom.NodeSelectionGroupName, c.custom.DirectGroupName},
-		"default":                     c.custom.NodeSelectionGroupName,
-	})
-	return nil
+	return outbounds, names
 }
 
-func isDirect(outbound string, keywords []string) bool {
-	for _, keyword := range keywords {
-		if strings.Contains(strings.ToLower(outbound), keyword) {
-			return true
-		}
+// resolveOutboundExpr 处理 outbound tag 中的 @ 表达式：
+//   - "组名@all"              -> 填充全部节点
+//   - "组名@keywords=台湾,tw"  -> 填充包含任一关键词的节点
+//   - "组名@exclude=美国,mg"   -> 填充不包含任一关键词的节点
+//   - 无 @ 的组原样保留
+// 筛选出的节点 append 到该组已有的 outbounds 之后，tag 还原为组名
+func resolveOutboundExpr(ob map[string]any, nodeNames []string) {
+	tag, _ := ob["tag"].(string)
+	parts := strings.SplitN(tag, "@", 2)
+	if len(parts) != 2 {
+		return
 	}
-	return false
+	groupName, expr := parts[0], parts[1]
+	ob["tag"] = groupName
+
+	var matched []string
+	switch {
+	case expr == "all":
+		matched = nodeNames
+	case strings.HasPrefix(expr, "keywords="):
+		keywords := strings.Split(strings.TrimPrefix(expr, "keywords="), ",")
+		matched = filterNodes(nodeNames, keywords, true)
+	case strings.HasPrefix(expr, "exclude="):
+		keywords := strings.Split(strings.TrimPrefix(expr, "exclude="), ",")
+		matched = filterNodes(nodeNames, keywords, false)
+	default:
+		// 未知表达式，忽略（保持 tag 原样？不，已拆分了，保留组名）
+		return
+	}
+
+	list, _ := ob["outbounds"].([]any)
+	for _, name := range matched {
+		list = append(list, name)
+	}
+	ob["outbounds"] = list
 }
 
-func filterOutbound(outboundNames []string, keywords []string) []string {
-	outbounds := make([]string, 0)
-	if len(keywords) == 0 {
-		return outbounds
-	}
-	for _, name := range outboundNames {
-		for _, keyword := range keywords {
-			if strings.Contains(name, keyword) {
-				outbounds = append(outbounds, name)
+// filterNodes 按关键词过滤节点名（或语义：包含任一关键词即匹配）
+func filterNodes(nodeNames []string, keywords []string, include bool) []string {
+	result := make([]string, 0)
+	for _, name := range nodeNames {
+		matched := false
+		for _, kw := range keywords {
+			if kw != "" && strings.Contains(name, kw) {
+				matched = true
+				break
 			}
 		}
+		if matched == include {
+			result = append(result, name)
+		}
 	}
-	return outbounds
-}
-
-func ruleType(clashRule string) (string, error) {
-	switch clashRule {
-	case "DOMAIN":
-		return "domain", nil
-	case "DOMAIN-SUFFIX":
-		return "domain_suffix", nil
-	case "DOMAIN-KEYWORD":
-		return "domain_keyword", nil
-	case "IP-CIDR", "IP-CIDR6":
-		return "ip_cidr", nil
-	case "PROCESS-NAME":
-		return "process_name", nil
-	default:
-		return "", fmt.Errorf("unsupport condition name: %v\n", clashRule)
-	}
+	return result
 }
 
 func LoadSingboxFromPath(singboxPath string) (*SingBox, error) {

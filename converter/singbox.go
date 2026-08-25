@@ -1,39 +1,12 @@
 package converter
 
 type SingBox struct {
-	Custom       *Custom          `json:"custom,omitempty"`
 	Log          *Log             `json:"log,omitempty"`
 	Experimental *Experimental    `json:"experimental,omitempty"`
 	DNS          *DNS             `json:"dns,omitempty"`
 	Inbounds     []map[string]any `json:"inbounds,omitempty"`
 	Outbounds    []map[string]any `json:"outbounds,omitempty"`
 	Route        *Route           `json:"route,omitempty"`
-}
-
-type Custom struct {
-	// 默认使用的入站，模板内会把所有类型的 inbound 都填上，但是具体只使用一个
-	DefaultInboundIndex int `json:"default_inbound_index"`
-
-	NodeSelectionGroupName string `json:"node_selection_group_name"`
-	AutoSelectionGroupName string `json:"auto_selection_group_name"`
-	DirectGroupName        string `json:"direct_group_name"`
-	EscapeGroupName        string `json:"escape_group_name"`
-
-	DirectDNSServer           string            `json:"direct_dns_server,omitempty"`
-	ProxyDNSServer            string            `json:"proxy_dns_server,omitempty"`
-	DirectRuleKeywords        []string          `json:"direct_rule_keywords,omitempty"`
-	DirectRuleSetIndexInDNS   int               `json:"direct_ruleset_index_in_dns,omitempty"`
-	ProxyRuleSetIndexInDNS    int               `json:"proxy_ruleset_index_in_dns,omitempty"`
-	DirectRuleSetIndexInRoute int               `json:"direct_ruleset_index_in_route,omitempty"`
-	ProxyRuleSetIndexInRoute  int               `json:"proxy_ruleset_index_in_route,omitempty"`
-	OutboundSelectors         []CustomSelectors `json:"selectors,omitempty"`
-}
-
-type CustomSelectors struct {
-	Tag             string   `json:"tag"`
-	SelectorType    string   `json:"type"`
-	Keywords        []string `json:"keywords,omitempty"`
-	DefaultOutbound string   `json:"default,omitempty"`
 }
 
 type Experimental struct {

@@ -1,8 +1,8 @@
 package converter
 
+// Clash 订阅配置结构，只解析节点（proxies），不解析规则（rules）
 type Clash struct {
-	Rules   []string `yaml:"rules"`
-	Proxies []Proxy  `yaml:"proxies"`
+	Proxies []Proxy `yaml:"proxies"`
 }
 
 type Proxy struct {
