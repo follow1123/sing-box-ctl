@@ -155,10 +155,11 @@ async function loadSelects() {
     }
     const tSel = $('template');
     tSel.innerHTML = '';
-    for (const name of templates) {
+    for (const t of templates) {
       const opt = document.createElement('option');
-      opt.value = name;
-      opt.textContent = name;
+      opt.value = t.uuid;
+      opt.textContent = t.name + (t.default ? '（默认）' : '');
+      if (t.default) opt.selected = true;
       tSel.appendChild(opt);
     }
   } catch (e) {
