@@ -7,10 +7,10 @@ const (
 	SourceUpload = "upload"
 )
 
-// SingBoxCtlConfig 是主配置文件结构（-c 指定）
+// SingBoxCtlConfig 是主配置文件结构（-c 指定），仅保留工作目录
+// provider 和模板的元数据都存放在文件系统中
 type SingBoxCtlConfig struct {
-	WorkingDir string           `json:"working_dir"`
-	Providers  []ProviderConfig `json:"providers"`
+	WorkingDir string `json:"working_dir"`
 }
 
 type ProviderConfig struct {

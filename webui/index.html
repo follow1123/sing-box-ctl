@@ -194,12 +194,11 @@ $('add-form').onsubmit = async (e) => {
       });
       await uploadFile(editingUuid);
     } else {
-      const list = await api('/api/providers', {
+      const created = await api('/api/providers', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body),
       });
-      const created = list[list.length - 1];
       await uploadFile(created.uuid);
     }
     editingUuid = null;

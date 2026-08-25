@@ -11,9 +11,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
-	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/follow1123/sing-box-ctl/config"
@@ -78,6 +76,18 @@ func New(configPath string, port int) (*Server, error) {
 	return s, nil
 }
 
+func (s *Server) Serve() error {
+	log.Printf("webui started on %s", s.server.Addr)
+	if err := s.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("start webui server error:\n\t%w", err)
+	}
+	return nil
+}
+
+func (s *Server) Stop(ctx context.Context) error {
+	return s.server.Shutdown(ctx)
+}
+
 // recoverMiddleware 捕获 handler 中的 panic，防止服务崩溃
 func recoverMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -89,18 +99,6 @@ func recoverMiddleware(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(w, r)
 	})
-}
-
-func (s *Server) Serve() error {
-	log.Printf("webui started on %s", s.server.Addr)
-	if err := s.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("start webui server error:\n\t%w", err)
-	}
-	return nil
-}
-
-func (s *Server) Stop(ctx context.Context) error {
-	return s.server.Shutdown(ctx)
 }
 
 func (s *Server) newProvider() (*provider.Provider, error) {
@@ -169,16 +167,13 @@ func (s *Server) providersHandle(w http.ResponseWriter, r *http.Request) {
 			handleError(w, err, http.StatusBadRequest)
 			return
 		}
-		if err := p.Add(req.Name, req.Url, req.Source, req.Message); err != nil {
+		uuid, err := p.Add(req.Name, req.Url, req.Source, req.Message)
+		if err != nil {
 			handleError(w, err, http.StatusBadRequest)
 			return
 		}
-		if err := p.Save(); err != nil {
-			handleInternalServerError(w, err)
-			return
-		}
 		w.WriteHeader(http.StatusCreated)
-		writeJSON(w, p.List())
+		writeJSON(w, p.Get(uuid))
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -214,17 +209,9 @@ func (s *Server) providerHandle(w http.ResponseWriter, r *http.Request) {
 			handleError(w, err, http.StatusBadRequest)
 			return
 		}
-		if err := p.Save(); err != nil {
-			handleInternalServerError(w, err)
-			return
-		}
 		writeJSON(w, p.Get(uuid))
 	case len(parts) == 1 && r.Method == http.MethodDelete:
 		if err := p.Delete(uuid); err != nil {
-			handleInternalServerError(w, err)
-			return
-		}
-		if err := p.Save(); err != nil {
 			handleInternalServerError(w, err)
 			return
 		}
@@ -296,118 +283,126 @@ func (s *Server) uploadHandle(w http.ResponseWriter, r *http.Request, p *provide
 		return
 	}
 	// 记录上传文件名
-	prov.FileName = header.Filename
-	if err := p.Save(); err != nil {
+	if err := p.SetFileName(uuid, header.Filename); err != nil {
 		handleInternalServerError(w, err)
 		return
 	}
 	log.Printf("provider '%s' subscription uploaded: %d bytes", prov.Name, len(data))
-	writeJSON(w, map[string]any{"ok": true, "bytes": len(data), "file_name": prov.FileName})
+	writeJSON(w, map[string]any{"ok": true, "bytes": len(data), "file_name": p.Get(uuid).FileName})
 }
 
 // ================= template API =================
 
-// isValidTemplateName 校验模板名：非空、无路径分隔符、不以 . 开头、不带 .json 后缀
-func isValidTemplateName(name string) bool {
-	return name != "" &&
-		name != "." && name != ".." &&
-		!strings.ContainsAny(name, `/\`) &&
-		!strings.HasPrefix(name, ".") &&
-		!strings.HasSuffix(name, ".json")
+// isValidTemplateUuid 校验模板 uuid：非空、无路径分隔符
+func isValidTemplateUuid(uuid string) bool {
+	return uuid != "" && filepath.Base(uuid) == uuid && !strings.HasPrefix(uuid, ".")
 }
 
-func (s *Server) templatePath(name string) string {
-	return filepath.Join(s.conf.TemplatesDir, name+".json")
-}
-
-// GET /api/templates -> 模板名列表
-// POST /api/templates?name=xxx -> 新建模板（初始化为默认内容）
+// GET /api/templates -> 模板列表 [{uuid,name,default}]
+// POST /api/templates?name=xxx -> 新建模板（初始化为内置默认内容）
 func (s *Server) templatesHandle(w http.ResponseWriter, r *http.Request) {
+	p, err := s.newProvider()
+	if err != nil {
+		handleInternalServerError(w, err)
+		return
+	}
+
 	switch r.Method {
 	case http.MethodGet:
-		entries, err := os.ReadDir(s.conf.TemplatesDir)
+		infos, err := p.ListTemplates()
 		if err != nil {
 			handleInternalServerError(w, err)
 			return
 		}
-		var names []string
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
-				names = append(names, strings.TrimSuffix(e.Name(), ".json"))
-			}
-		}
-		sort.Strings(names)
-		writeJSON(w, names)
+		writeJSON(w, infos)
 	case http.MethodPost:
 		name := r.URL.Query().Get("name")
-		if !isValidTemplateName(name) {
-			handleError(w, fmt.Errorf("invalid template name: %s", name), http.StatusBadRequest)
+		if name == "" {
+			handleError(w, fmt.Errorf("name is required"), http.StatusBadRequest)
 			return
 		}
-		path := s.templatePath(name)
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			handleError(w, fmt.Errorf("template '%s' already exists", name), http.StatusConflict)
+		uuid, err := p.AddTemplate(name)
+		if err != nil {
+			handleError(w, err, http.StatusBadRequest)
 			return
 		}
-		// 复制默认模板内容作为初始内容
-		if err := os.WriteFile(path, defaultTemplateData(), 0600); err != nil {
+		// 初始化为内置默认模板内容
+		if err := p.SaveTemplate(uuid, defaultTemplateData()); err != nil {
 			handleInternalServerError(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
-		writeJSON(w, map[string]any{"name": name})
+		writeJSON(w, p.GetTemplate(uuid))
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
 
-// GET /api/templates/<name> -> 模板内容
-// PUT /api/templates/<name> -> 保存模板（body 为 JSON 内容）
-// DELETE /api/templates/<name> -> 删除模板
+// GET /api/templates/<uuid> -> 模板内容
+// PUT /api/templates/<uuid> -> 保存模板（body 为 JSON 内容，滚动 current/last/old）
+// DELETE /api/templates/<uuid> -> 删除模板（默认模板不可删）
+// POST /api/templates/<uuid>/default -> 设为默认
 func (s *Server) templateHandle(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimPrefix(r.URL.Path, apiTemplatesPath+"/")
-	if !isValidTemplateName(name) {
-		handleError(w, fmt.Errorf("invalid template name: %s", name), http.StatusBadRequest)
+	p, err := s.newProvider()
+	if err != nil {
+		handleInternalServerError(w, err)
 		return
 	}
-	path := s.templatePath(name)
 
-	switch r.Method {
-	case http.MethodGet:
-		data, err := os.ReadFile(path)
+	rest := strings.TrimPrefix(r.URL.Path, apiTemplatesPath+"/")
+	parts := strings.Split(rest, "/")
+	if len(parts) < 1 || !isValidTemplateUuid(parts[0]) {
+		handleError(w, fmt.Errorf("invalid template uuid"), http.StatusBadRequest)
+		return
+	}
+	uuid := parts[0]
+	info := p.GetTemplate(uuid)
+	if info == nil {
+		handleError(w, fmt.Errorf("no template with uuid: %s", uuid), http.StatusNotFound)
+		return
+	}
+
+	switch {
+	case len(parts) == 1 && r.Method == http.MethodGet:
+		data, err := p.ReadTemplate(uuid)
 		if err != nil {
 			handleError(w, err, http.StatusNotFound)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Write(data)
-	case http.MethodPut:
+	case len(parts) == 1 && r.Method == http.MethodPut:
 		data, err := io.ReadAll(r.Body)
 		if err != nil {
 			handleError(w, fmt.Errorf("read request body error:\n\t%w", err), http.StatusBadRequest)
 			return
 		}
-		// 校验是合法 JSON
 		if !json.Valid(data) {
 			handleError(w, fmt.Errorf("invalid json content"), http.StatusBadRequest)
 			return
 		}
-		if err := os.WriteFile(path, data, 0600); err != nil {
+		if err := p.SaveTemplate(uuid, data); err != nil {
 			handleInternalServerError(w, err)
 			return
 		}
-		log.Printf("template '%s' saved: %d bytes", name, len(data))
+		log.Printf("template '%s' saved: %d bytes", info.Name, len(data))
 		writeJSON(w, map[string]any{"ok": true})
-	case http.MethodDelete:
-		if name == config.DefaultTemplateName {
+	case len(parts) == 1 && r.Method == http.MethodDelete:
+		if info.Default {
 			handleError(w, fmt.Errorf("default template cannot be deleted"), http.StatusBadRequest)
 			return
 		}
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		if err := p.DeleteTemplate(uuid); err != nil {
 			handleInternalServerError(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	case len(parts) == 2 && parts[1] == "default" && r.Method == http.MethodPost:
+		if err := p.SetDefaultTemplate(uuid); err != nil {
+			handleInternalServerError(w, err)
+			return
+		}
+		writeJSON(w, p.GetTemplate(uuid))
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -415,7 +410,7 @@ func (s *Server) templateHandle(w http.ResponseWriter, r *http.Request) {
 
 // ================= config API =================
 
-// GET /config/<uuid>?template=<name> -> 实时转换订阅为 sing-box 配置
+// GET /config/<uuid>?template=<template-uuid> -> 实时转换订阅为 sing-box 配置
 func (s *Server) configHandle(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -443,23 +438,22 @@ func (s *Server) configHandle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 选择模板
+	// 选择模板（uuid，缺省用默认模板）
 	template := r.URL.Query().Get("template")
 	if template == "" {
-		template = config.DefaultTemplateName
+		template, err = p.DefaultTemplate()
+		if err != nil {
+			handleInternalServerError(w, err)
+			return
+		}
 	}
-	if !isValidTemplateName(template) {
-		handleError(w, fmt.Errorf("invalid template name: %s", template), http.StatusBadRequest)
-		return
-	}
-	templatePath := s.templatePath(template)
-	if _, err := os.Stat(templatePath); err != nil {
-		handleError(w, fmt.Errorf("template '%s' not found", template), http.StatusNotFound)
+	if !isValidTemplateUuid(template) || !p.TemplateExists(template) {
+		handleError(w, fmt.Errorf("template not found"), http.StatusNotFound)
 		return
 	}
 
 	// 实时转换
-	conv, err := converter.New(templatePath)
+	conv, err := converter.New(p.TemplateDir(template))
 	if err != nil {
 		handleInternalServerError(w, err)
 		return

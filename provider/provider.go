@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
+	"sort"
 
 	"github.com/google/uuid"
 )
@@ -50,37 +50,27 @@ func (p *Provider) WorkingDir() string {
 	return p.config.WorkingDir
 }
 
+// ProviderDir 返回指定 provider 的数据目录
+func (p *Provider) ProviderDir(uuid string) string {
+	return filepath.Join(p.config.WorkingDir, "providers", uuid)
+}
+
 // SubscriptionDir 返回指定 provider 的订阅数据目录
 func (p *Provider) SubscriptionDir(uuid string) string {
-	return filepath.Join(p.config.WorkingDir, "providers", uuid)
+	return p.ProviderDir(uuid)
+}
+
+// TemplateDir 返回指定模板的数据目录
+func (p *Provider) TemplateDir(uuid string) string {
+	return filepath.Join(p.config.WorkingDir, "templates", uuid)
 }
 
 // SaveSubscription 保存订阅内容到 providers/<uuid>/，滚动保留 current/last/old 三份
 func (p *Provider) SaveSubscription(uuid string, data []byte) error {
-	dir := p.SubscriptionDir(uuid)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(p.SubscriptionDir(uuid), 0700); err != nil {
 		return fmt.Errorf("create subscription dir error:\n\t%w", err)
 	}
-
-	// old ← last
-	lastFile := filepath.Join(dir, "last")
-	if last, err := os.ReadFile(lastFile); err == nil {
-		if err := os.WriteFile(filepath.Join(dir, "old"), last, 0600); err != nil {
-			return fmt.Errorf("save old subscription error:\n\t%w", err)
-		}
-	}
-	// last ← current
-	currentFile := filepath.Join(dir, "current")
-	if current, err := os.ReadFile(currentFile); err == nil {
-		if err := os.WriteFile(lastFile, current, 0600); err != nil {
-			return fmt.Errorf("save last subscription error:\n\t%w", err)
-		}
-	}
-	// current ← 新数据
-	if err := os.WriteFile(currentFile, data, 0600); err != nil {
-		return fmt.Errorf("save current subscription error:\n\t%w", err)
-	}
-	return nil
+	return saveRolling(p.SubscriptionDir(uuid), data)
 }
 
 // ReadSubscription 读取指定 provider 的当前订阅内容
@@ -92,127 +82,230 @@ func (p *Provider) ReadSubscription(uuid string) ([]byte, error) {
 	return data, nil
 }
 
-func (p *Provider) Add(name string, url string, source string, message string) error {
-	if source == "" {
-		source = SourceURL
-	}
-	if !isValidSource(source) {
-		return fmt.Errorf("invalid source '%s', must be '%s' or '%s'", source, SourceURL, SourceUpload)
-	}
-	if source == SourceURL && url == "" {
-		return fmt.Errorf("url is required when source is '%s'", SourceURL)
-	}
-	if source == SourceURL && !isHTTPURL(url) {
-		return fmt.Errorf("invalid url '%s', must be http(s) url", url)
-	}
-	if name == "" {
-		return fmt.Errorf("name is required")
-	}
-
-	for _, prov := range p.config.Providers {
-		if prov.Name == name {
-			return fmt.Errorf("duplicate provider name '%s'", name)
+// saveRolling 滚动保存三份：old ← last ← current ← data
+func saveRolling(dir string, data []byte) error {
+	// old ← last
+	lastFile := filepath.Join(dir, "last")
+	if last, err := os.ReadFile(lastFile); err == nil {
+		if err := os.WriteFile(filepath.Join(dir, "old"), last, 0600); err != nil {
+			return fmt.Errorf("save old file error:\n\t%w", err)
 		}
 	}
-
-	p.config.Providers = append(p.config.Providers, ProviderConfig{
-		Uuid:    uuid.NewString(),
-		Name:    name,
-		Url:     url,
-		Source:  source,
-		Message: message,
-	})
+	// last ← current
+	currentFile := filepath.Join(dir, "current")
+	if current, err := os.ReadFile(currentFile); err == nil {
+		if err := os.WriteFile(lastFile, current, 0600); err != nil {
+			return fmt.Errorf("save last file error:\n\t%w", err)
+		}
+	}
+	// current ← 新数据
+	if err := os.WriteFile(currentFile, data, 0600); err != nil {
+		return fmt.Errorf("save current file error:\n\t%w", err)
+	}
 	return nil
 }
 
+// ================= provider 元数据（文件系统实现） =================
+
+// Add 新建 provider，返回 uuid。source 为 url 时写 url 文件；upload 时仅建目录，等待上传。
+func (p *Provider) Add(name string, url string, source string, message string) (string, error) {
+	if source == "" {
+		source = SourceURL
+	}
+	if err := p.validate(name, url, source); err != nil {
+		return "", err
+	}
+	// 重名检查
+	if p.nameExists(name) {
+		return "", fmt.Errorf("duplicate provider name '%s'", name)
+	}
+
+	uuid := uuid.NewString()
+	dir := p.ProviderDir(uuid)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", fmt.Errorf("create provider dir error:\n\t%w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "name"), []byte(name), 0600); err != nil {
+		return "", fmt.Errorf("write provider name error:\n\t%w", err)
+	}
+	if source == SourceURL {
+		if err := os.WriteFile(filepath.Join(dir, "url"), []byte(url), 0600); err != nil {
+			return "", fmt.Errorf("write provider url error:\n\t%w", err)
+		}
+	}
+	if message != "" {
+		if err := os.WriteFile(filepath.Join(dir, "message"), []byte(message), 0600); err != nil {
+			return "", fmt.Errorf("write provider message error:\n\t%w", err)
+		}
+	}
+	return uuid, nil
+}
+
+// Update 更新 provider 元数据。source 切为 url 时写 url 并清除 file_name；切为 upload 时清除 url。
 func (p *Provider) Update(uuid string, name string, url string, source string, message string) error {
-	idx := p.indexOf(uuid)
-	if idx < 0 {
+	if !p.Exists(uuid) {
 		return fmt.Errorf("no provider with uuid: %s", uuid)
 	}
 	if source == "" {
 		source = SourceURL
 	}
-	if !isValidSource(source) {
+	if err := p.validate(name, url, source); err != nil {
+		return err
+	}
+	// 重名检查（排除自己）
+	if other, _ := p.findByName(name); other != "" && other != uuid {
+		return fmt.Errorf("duplicate provider name '%s'", name)
+	}
+
+	dir := p.ProviderDir(uuid)
+	if err := os.WriteFile(filepath.Join(dir, "name"), []byte(name), 0600); err != nil {
+		return fmt.Errorf("write provider name error:\n\t%w", err)
+	}
+	if source == SourceURL {
+		if err := os.WriteFile(filepath.Join(dir, "url"), []byte(url), 0600); err != nil {
+			return fmt.Errorf("write provider url error:\n\t%w", err)
+		}
+		// 切回 url 时清除上传文件名
+		os.Remove(filepath.Join(dir, "file_name"))
+	} else {
+		os.Remove(filepath.Join(dir, "url"))
+	}
+	if message != "" {
+		if err := os.WriteFile(filepath.Join(dir, "message"), []byte(message), 0600); err != nil {
+			return fmt.Errorf("write provider message error:\n\t%w", err)
+		}
+	} else {
+		os.Remove(filepath.Join(dir, "message"))
+	}
+	return nil
+}
+
+// SetFileName 记录上传文件名（upload 来源）
+func (p *Provider) SetFileName(uuid string, fileName string) error {
+	if !p.Exists(uuid) {
+		return fmt.Errorf("no provider with uuid: %s", uuid)
+	}
+	if err := os.WriteFile(filepath.Join(p.ProviderDir(uuid), "file_name"), []byte(fileName), 0600); err != nil {
+		return fmt.Errorf("write provider file_name error:\n\t%w", err)
+	}
+	return nil
+}
+
+// Delete 删除 provider（整个目录，含订阅数据）
+func (p *Provider) Delete(uuid string) error {
+	if !p.Exists(uuid) {
+		return nil
+	}
+	if err := os.RemoveAll(p.ProviderDir(uuid)); err != nil {
+		return fmt.Errorf("remove provider dir error:\n\t%w", err)
+	}
+	return nil
+}
+
+// Get 读取 provider 元数据；source 由文件推断（url 文件存在即有 url，否则为 upload）
+func (p *Provider) Get(uuid string) *ProviderConfig {
+	if !p.Exists(uuid) {
+		return nil
+	}
+	dir := p.ProviderDir(uuid)
+	info := &ProviderConfig{Uuid: uuid}
+
+	name, _ := readFileContent(filepath.Join(dir, "name"))
+	info.Name = name
+
+	if urlContent, ok := readFileContent(filepath.Join(dir, "url")); ok && urlContent != "" {
+		info.Source = SourceURL
+		info.Url = urlContent
+	} else {
+		info.Source = SourceUpload
+	}
+	if fileName, ok := readFileContent(filepath.Join(dir, "file_name")); ok {
+		info.FileName = fileName
+	}
+	if message, ok := readFileContent(filepath.Join(dir, "message")); ok {
+		info.Message = message
+	}
+	return info
+}
+
+// List 列出所有 provider
+func (p *Provider) List() []ProviderConfig {
+	entries, err := os.ReadDir(filepath.Join(p.config.WorkingDir, "providers"))
+	if err != nil {
+		return nil
+	}
+	list := make([]ProviderConfig, 0)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if info := p.Get(e.Name()); info != nil {
+			list = append(list, *info)
+		}
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
+	return list
+}
+
+// Exists 判断 provider 是否存在
+func (p *Provider) Exists(uuid string) bool {
+	info, err := os.Stat(p.ProviderDir(uuid))
+	return err == nil && info.IsDir()
+}
+
+// IsUploadSource 判断 provider 是否为上传来源（无 url 文件）
+func (p *Provider) IsUploadSource(uuid string) bool {
+	_, ok := readFileContent(filepath.Join(p.ProviderDir(uuid), "url"))
+	return !ok
+}
+
+func (p *Provider) validate(name string, url string, source string) error {
+	if source != SourceURL && source != SourceUpload {
 		return fmt.Errorf("invalid source '%s', must be '%s' or '%s'", source, SourceURL, SourceUpload)
 	}
-	if source == SourceURL && url == "" {
-		return fmt.Errorf("url is required when source is '%s'", SourceURL)
-	}
-	if source == SourceURL && !isHTTPURL(url) {
-		return fmt.Errorf("invalid url '%s', must be http(s) url", url)
+	if source == SourceURL {
+		if url == "" {
+			return fmt.Errorf("url is required when source is '%s'", SourceURL)
+		}
+		if !isHTTPURL(url) {
+			return fmt.Errorf("invalid url '%s', must be http(s) url", url)
+		}
 	}
 	if name == "" {
 		return fmt.Errorf("name is required")
 	}
-
-	for i, prov := range p.config.Providers {
-		if i != idx && prov.Name == name {
-			return fmt.Errorf("duplicate provider name '%s'", name)
-		}
-	}
-
-	p.config.Providers[idx].Name = name
-	p.config.Providers[idx].Url = url
-	p.config.Providers[idx].Source = source
-	p.config.Providers[idx].Message = message
-	// source 切回 url 时清空上传文件名
-	if source != SourceUpload {
-		p.config.Providers[idx].FileName = ""
-	}
 	return nil
 }
 
-func (p *Provider) Delete(uuid string) error {
-	idx := p.indexOf(uuid)
-	if idx < 0 {
-		return nil
-	}
-	p.config.Providers = slices.Delete(p.config.Providers, idx, idx+1)
-
-	// 清理该 provider 的订阅数据目录
-	if err := os.RemoveAll(p.SubscriptionDir(uuid)); err != nil {
-		return fmt.Errorf("remove subscription dir error:\n\t%w", err)
-	}
-	return nil
+func (p *Provider) nameExists(name string) bool {
+	uuid, _ := p.findByName(name)
+	return uuid != ""
 }
 
-func (p *Provider) Get(uuid string) *ProviderConfig {
-	for i := range p.config.Providers {
-		if p.config.Providers[i].Uuid == uuid {
-			return &p.config.Providers[i]
-		}
-	}
-	return nil
-}
-
-func (p *Provider) List() []ProviderConfig {
-	return p.config.Providers
-}
-
-func (p *Provider) Save() error {
-	data, err := json.MarshalIndent(p.config, "", "  ")
+// findByName 按名称查找 provider uuid，不存在返回 ""
+func (p *Provider) findByName(name string) (string, error) {
+	entries, err := os.ReadDir(filepath.Join(p.config.WorkingDir, "providers"))
 	if err != nil {
-		return fmt.Errorf("marshal to json error:\n\t%w", err)
+		return "", err
 	}
-
-	if err := os.WriteFile(p.path, data, 0660); err != nil {
-		return fmt.Errorf("save config to %s error:\n\t%w", p.path, err)
-	}
-	return nil
-}
-
-func (p *Provider) indexOf(uuid string) int {
-	for i, prov := range p.config.Providers {
-		if prov.Uuid == uuid {
-			return i
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if content, ok := readFileContent(filepath.Join(p.ProviderDir(e.Name()), "name")); ok && content == name {
+			return e.Name(), nil
 		}
 	}
-	return -1
+	return "", nil
 }
 
-func isValidSource(source string) bool {
-	return source == SourceURL || source == SourceUpload
+// readFileContent 读取文件内容；文件不存在时返回 false
+func readFileContent(path string) (string, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	return string(data), true
 }
 
 // DataFromSource 从 url 或本地文件读取数据

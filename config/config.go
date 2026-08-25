@@ -13,8 +13,6 @@ import (
 var singboxTemplateConfigData []byte
 
 const (
-	// DefaultTemplateName 默认模板文件名（不含扩展名）
-	DefaultTemplateName = "default"
 	// TemplatesDirName 模板目录名（位于 working_dir 下）
 	TemplatesDirName = "templates"
 	// ProvidersDirName provider 订阅数据目录名（位于 working_dir 下）
@@ -26,7 +24,6 @@ type Config struct {
 	WorkingDir   string
 	ProvidersDir string
 	TemplatesDir string
-	Providers    []provider.ProviderConfig
 }
 
 // New 从主配置文件加载配置，解析路径并初始化工作目录
@@ -54,7 +51,7 @@ func New(configPath string) (*Config, error) {
 	}
 
 	// 模板目录为空时初始化默认模板
-	if err := initDefaultTemplate(templatesDir); err != nil {
+	if err := initDefaultTemplate(p); err != nil {
 		return nil, err
 	}
 
@@ -63,7 +60,6 @@ func New(configPath string) (*Config, error) {
 		WorkingDir:   workingDir,
 		ProvidersDir: providersDir,
 		TemplatesDir: templatesDir,
-		Providers:    p.List(),
 	}, nil
 }
 
@@ -72,18 +68,24 @@ func TemplateData() []byte {
 	return singboxTemplateConfigData
 }
 
-// initDefaultTemplate 模板目录为空时，从内嵌数据创建默认模板
-func initDefaultTemplate(templatesDir string) error {
-	entries, err := os.ReadDir(templatesDir)
+// initDefaultTemplate 没有模板时，创建默认模板（uuid 目录 + name + default 标记 + 内嵌内容）
+func initDefaultTemplate(p *provider.Provider) error {
+	infos, err := p.ListTemplates()
 	if err != nil {
-		return fmt.Errorf("read templates dir error:\n\t%w", err)
+		return fmt.Errorf("list templates error:\n\t%w", err)
 	}
-	if len(entries) > 0 {
+	if len(infos) > 0 {
 		return nil
 	}
-	defaultFile := filepath.Join(templatesDir, DefaultTemplateName+".json")
-	if err := os.WriteFile(defaultFile, singboxTemplateConfigData, 0600); err != nil {
+	uuid, err := p.AddTemplate("默认模板")
+	if err != nil {
 		return fmt.Errorf("init default template error:\n\t%w", err)
+	}
+	if err := p.SaveTemplate(uuid, singboxTemplateConfigData); err != nil {
+		return fmt.Errorf("init default template content error:\n\t%w", err)
+	}
+	if err := p.SetDefaultTemplate(uuid); err != nil {
+		return fmt.Errorf("init default template mark error:\n\t%w", err)
 	}
 	return nil
 }
