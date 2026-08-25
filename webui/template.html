@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>sbctl - 模板管理</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; color: #333; height: 100vh; display: flex; flex-direction: column; }
+  header { padding: 0.8rem 1.2rem; border-bottom: 1px solid #ddd; display: flex; align-items: center; gap: 1rem; }
+  header h1 { font-size: 1.2rem; margin: 0; }
+  header a { color: #06c; text-decoration: none; }
+  main { flex: 1; display: flex; overflow: hidden; }
+  aside { width: 220px; border-right: 1px solid #ddd; padding: 1rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; }
+  aside h2 { font-size: 0.9rem; margin: 0 0 0.5rem; color: #666; }
+  .tpl-item { display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0.6rem; border-radius: 4px; cursor: pointer; }
+  .tpl-item:hover { background: #f0f0f0; }
+  .tpl-item.active { background: #e3f2fd; }
+  .tpl-item .del { color: #c00; cursor: pointer; border: none; background: none; font-size: 0.9rem; }
+  #editor-wrap { flex: 1; display: flex; flex-direction: column; padding: 1rem; }
+  .toolbar { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; }
+  .toolbar button { padding: 0.35rem 0.8rem; cursor: pointer; }
+  #editor { flex: 1; border: 1px solid #ddd; border-radius: 4px; }
+  .error { color: #c00; margin-left: 0.5rem; white-space: pre-wrap; }
+  .ok { color: #080; margin-left: 0.5rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>模板管理</h1>
+  <a href="/">← Provider 管理</a>
+</header>
+<main>
+  <aside>
+    <h2>模板列表</h2>
+    <button id="new-tpl">+ 新建模板</button>
+    <div id="tpl-list"></div>
+  </aside>
+  <div id="editor-wrap">
+    <div class="toolbar">
+      <span id="cur-name" style="font-weight:bold"></span>
+      <button id="save">保存</button>
+      <button id="format">格式化</button>
+      <span class="ok" id="ok"></span>
+      <span class="error" id="error"></span>
+    </div>
+    <div id="editor"></div>
+  </div>
+</main>
+
+<script src="/static/ace.js"></script>
+<script src="/static/mode-json.js"></script>
+<script src="/static/theme-one_dark.js"></script>
+<script>
+const editor = ace.edit('editor');
+editor.session.setMode('ace/mode/json');
+editor.setTheme('ace/theme/one_dark');
+editor.setOptions({
+  showPrintMargin: false,
+  tabSize: 2,
+  useSoftTabs: true,
+  fontSize: 13,
+});
+
+const errorBox = $('error');
+const okBox = $('ok');
+function $(id) { return document.getElementById(id); }
+function showError(msg) { errorBox.textContent = msg || ''; okBox.textContent = ''; }
+function showOk(msg) { okBox.textContent = msg || ''; errorBox.textContent = ''; }
+
+async function api(url, options) {
+  const resp = await fetch(url, options);
+  const text = await resp.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (e) {}
+  if (!resp.ok) {
+    throw new Error(data && data.error ? data.error : ('HTTP ' + resp.status));
+  }
+  return data;
+}
+
+let currentName = null;
+
+async function loadList() {
+  const names = await api('/api/templates');
+  const list = $('tpl-list');
+  list.innerHTML = '';
+  for (const name of names) {
+    const div = document.createElement('div');
+    div.className = 'tpl-item' + (name === currentName ? ' active' : '');
+    div.innerHTML = `<span>${name}</span><button class="del" title="删除">✕</button>`;
+    div.onclick = (e) => { if (e.target.tagName !== 'BUTTON') openTemplate(name); };
+    div.querySelector('.del').onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm('删除模板 ' + name + '？')) return;
+      try {
+        await api('/api/templates/' + encodeURIComponent(name), {method: 'DELETE'});
+        if (currentName === name) { currentName = null; editor.setValue(''); $('cur-name').textContent = ''; }
+        loadList();
+      } catch (err) { showError('删除失败: ' + err.message); }
+    };
+    list.appendChild(div);
+  }
+}
+
+async function openTemplate(name) {
+  try {
+    const data = await api('/api/templates/' + encodeURIComponent(name));
+    currentName = name;
+    $('cur-name').textContent = name;
+    editor.setValue(JSON.stringify(data, null, 2), -1);
+    loadList();
+    showError('');
+  } catch (err) { showError('加载失败: ' + err.message); }
+}
+
+$('new-tpl').onclick = async () => {
+  const name = prompt('输入模板名称（将作为模板 ID，用于 URL 中的 template 参数）');
+  if (!name) return;
+  try {
+    await api('/api/templates?name=' + encodeURIComponent(name), {method: 'POST'});
+    await openTemplate(name);
+  } catch (err) { showError('新建失败: ' + err.message); }
+};
+
+$('save').onclick = async () => {
+  if (!currentName) { showError('请先选择模板'); return; }
+  try {
+    // 先尝试解析，校验 JSON 合法性
+    JSON.parse(editor.getValue());
+    await api('/api/templates/' + encodeURIComponent(currentName), {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: editor.getValue(),
+    });
+    showOk('已保存');
+  } catch (err) { showError('保存失败: ' + err.message); }
+};
+
+$('format').onclick = () => {
+  try {
+    editor.setValue(JSON.stringify(JSON.parse(editor.getValue()), null, 2), -1);
+    showOk('已格式化');
+  } catch (err) { showError('格式化失败（JSON 不合法）: ' + err.message); }
+};
+
+loadList();
+</script>
+</body>
+</html>

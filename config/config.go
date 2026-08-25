@@ -13,8 +13,10 @@ import (
 var singboxTemplateConfigData []byte
 
 const (
-	// TemplateFileName 转换模板文件名（位于 working_dir 下）
-	TemplateFileName = "singbox_template_config.json"
+	// DefaultTemplateName 默认模板文件名（不含扩展名）
+	DefaultTemplateName = "default"
+	// TemplatesDirName 模板目录名（位于 working_dir 下）
+	TemplatesDirName = "templates"
 	// ProvidersDirName provider 订阅数据目录名（位于 working_dir 下）
 	ProvidersDirName = "providers"
 )
@@ -23,7 +25,7 @@ type Config struct {
 	ConfigPath   string
 	WorkingDir   string
 	ProvidersDir string
-	TemplateFile string
+	TemplatesDir string
 	Providers    []provider.ProviderConfig
 }
 
@@ -41,25 +43,47 @@ func New(configPath string) (*Config, error) {
 	}
 
 	providersDir := filepath.Join(workingDir, ProvidersDirName)
-	templateFile := filepath.Join(workingDir, TemplateFileName)
+	templatesDir := filepath.Join(workingDir, TemplatesDirName)
 
 	// 初始化工作目录
 	if err := os.MkdirAll(providersDir, 0700); err != nil {
 		return nil, fmt.Errorf("init providers dir error:\n\t%w", err)
 	}
+	if err := os.MkdirAll(templatesDir, 0700); err != nil {
+		return nil, fmt.Errorf("init templates dir error:\n\t%w", err)
+	}
 
-	// 初始化转换模板
-	if _, err := os.Stat(templateFile); os.IsNotExist(err) {
-		if err := os.WriteFile(templateFile, singboxTemplateConfigData, 0600); err != nil {
-			return nil, fmt.Errorf("init template config error:\n\t%w", err)
-		}
+	// 模板目录为空时初始化默认模板
+	if err := initDefaultTemplate(templatesDir); err != nil {
+		return nil, err
 	}
 
 	return &Config{
 		ConfigPath:   configPath,
 		WorkingDir:   workingDir,
 		ProvidersDir: providersDir,
-		TemplateFile: templateFile,
+		TemplatesDir: templatesDir,
 		Providers:    p.List(),
 	}, nil
+}
+
+// TemplateData 返回内嵌的默认模板内容
+func TemplateData() []byte {
+	return singboxTemplateConfigData
+}
+
+// initDefaultTemplate 模板目录为空时，从内嵌数据创建默认模板
+func initDefaultTemplate(templatesDir string) error {
+	entries, err := os.ReadDir(templatesDir)
+	if err != nil {
+		return fmt.Errorf("read templates dir error:\n\t%w", err)
+	}
+	if len(entries) > 0 {
+		return nil
+	}
+	defaultFile := filepath.Join(templatesDir, DefaultTemplateName+".json")
+	if err := os.WriteFile(defaultFile, singboxTemplateConfigData, 0600); err != nil {
+		return fmt.Errorf("init default template error:\n\t%w", err)
+	}
+	return nil
 }

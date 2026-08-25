@@ -7,3 +7,4 @@ sbctl.exe
 # 本地测试配置
 config.json
 working_dir/
+serve.log
