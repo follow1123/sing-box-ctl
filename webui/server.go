@@ -21,26 +21,13 @@ import (
 	"github.com/follow1123/sing-box-ctl/settings"
 )
 
-//go:embed index.html
-var indexHtml string
-
-//go:embed template.html
-var templateHtml string
-
-//go:embed url.html
-var urlHtml string
-
-//go:embed static/*
-var staticFiles embed.FS
+//go:embed dist
+var distFiles embed.FS
 
 const (
-	homeUrlPath      = "/"
-	templatesUrlPath = "/templates"
-	urlPagePath      = "/url"
 	apiPath          = "/api/providers"
 	apiTemplatesPath = "/api/templates"
 	configPathURL    = "/config/"
-	staticUrlPath    = "/static/"
 )
 
 type Server struct {
@@ -57,19 +44,19 @@ func New(configPath string, port int) (*Server, error) {
 	s := &Server{configPath: configPath, conf: conf}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc(homeUrlPath, s.homeHandle)
-	mux.HandleFunc(templatesUrlPath, s.templatesPageHandle)
-	mux.HandleFunc(urlPagePath, s.urlPageHandle)
 	mux.HandleFunc(apiPath, s.providersHandle)
 	mux.HandleFunc(apiPath+"/", s.providerHandle)
 	mux.HandleFunc(apiTemplatesPath, s.templatesHandle)
 	mux.HandleFunc(apiTemplatesPath+"/", s.templateHandle)
 	mux.HandleFunc(configPathURL, s.configHandle)
-	staticSub, err := fs.Sub(staticFiles, "static")
+	// 前端构建产物（Vite 输出）
+	assetsSub, err := fs.Sub(distFiles, "dist/assets")
 	if err != nil {
-		return nil, fmt.Errorf("init static files error:\n\t%w", err)
+		return nil, fmt.Errorf("init dist files error:\n\t%w", err)
 	}
-	mux.Handle(staticUrlPath, http.StripPrefix(staticUrlPath, http.FileServer(http.FS(staticSub))))
+	mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assetsSub))))
+	// SPA：其余路径返回 index.html
+	mux.HandleFunc("/", s.spaHandle)
 
 	s.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
@@ -107,31 +94,15 @@ func (s *Server) newProvider() (*provider.Provider, error) {
 	return provider.New(s.configPath)
 }
 
-func (s *Server) homeHandle(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != homeUrlPath {
-		http.NotFound(w, r)
+// spaHandle 返回前端入口（Vite 构建的 index.html）
+func (s *Server) spaHandle(w http.ResponseWriter, r *http.Request) {
+	data, err := distFiles.ReadFile("dist/index.html")
+	if err != nil {
+		handleError(w, fmt.Errorf("frontend not built, run: cd frontend && pnpm build"), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(indexHtml))
-}
-
-func (s *Server) templatesPageHandle(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != templatesUrlPath {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(templateHtml))
-}
-
-func (s *Server) urlPageHandle(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != urlPagePath {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(urlHtml))
+	w.Write(data)
 }
 
 // ================= provider API =================
