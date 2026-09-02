@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	Version        = "0.3.0"
-	SingBoxVersion = "1.14.x"
+	Version        = "0.4.0"
+	SingBoxVersion = "0.14.0"
 )
 
 type options struct {
