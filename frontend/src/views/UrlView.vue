@@ -29,6 +29,11 @@ const apiDashboard = ref(true)
 const hasOtherInbound = ref(false)
 // 模板是否含 tun inbound（Android 平台必需）
 const hasTun = ref(false)
+// 模板默认值（勾选 mixed/api 时才应用到输入框，避免模板全量铺开）
+const tplDefaults = ref({
+  mixed: { listen: '', port: '' },
+  api: { listen: '', port: '', secret: '', dashboard: true },
+})
 const importUrlInput = ref('')
 
 const url = computed(() => buildUrl())
@@ -88,43 +93,81 @@ function onPlatformChange(): void {
   syncPlatformState()
 }
 
+/** 勾选 mixed 时用模板默认值填充输入框 */
+function fillMixedFromTemplate(): void {
+  mixedListen.value = tplDefaults.value.mixed.listen
+  mixedPort.value = tplDefaults.value.mixed.port
+}
+
+/** 勾选 api 时用模板默认值填充输入框 */
+function fillApiFromTemplate(): void {
+  apiListen.value = tplDefaults.value.api.listen
+  apiPort.value = tplDefaults.value.api.port
+  apiSecret.value = tplDefaults.value.api.secret
+  apiDashboard.value = tplDefaults.value.api.dashboard
+}
+
+function onMixedChange(): void {
+  if (mixed.value) fillMixedFromTemplate()
+}
+
+function onApiChange(): void {
+  if (apiEnabled.value) fillApiFromTemplate()
+}
+
 /** 从模板读取默认配置并回填页面（模板内的 mixed/tun/api inbound 默认值） */
 async function applyTemplateDefaults(): Promise<void> {
   if (!templateUuid.value) return
   try {
     const data = (await api<Record<string, any>>('/api/templates/' + templateUuid.value)) ?? {}
     const inbounds: any[] = data.inbounds ?? []
+    // 默认模式 = 模板 inbounds 第一个的类型
+    const firstInbound = inbounds[0]
     const mixedIn = inbounds.find((i) => i.type === 'mixed')
     const tunIn = inbounds.find((i) => i.type === 'tun')
+    const services: any[] = data.services ?? []
+    const apiSvc = services.find((s) => s.type === 'api')
+
     // 模板按默认平台（windows）编写，切换模板时平台复位
     platform.value = 'windows'
     syncPlatformState()
     hasTun.value = !!tunIn
-    mixed.value = !!mixedIn
-    mixedListen.value = mixedIn?.listen ?? ''
-    mixedPort.value = mixedIn?.listen_port != null ? String(mixedIn.listen_port) : ''
-    tun.value = !!tunIn
     // mixed/tun 之外视为常驻 inbound，存在时无需勾选也能生成有效配置
     hasOtherInbound.value = inbounds.some((i) => i.type !== 'mixed' && i.type !== 'tun')
 
-    const services: any[] = data.services ?? []
-    const apiSvc = services.find((s) => s.type === 'api')
-    apiEnabled.value = !!apiSvc
-    if (apiSvc) {
-      apiListen.value = apiSvc.listen ?? ''
-      apiPort.value = apiSvc.listen_port != null ? String(apiSvc.listen_port) : ''
-      apiSecret.value = apiSvc.secret ?? ''
-      const dash = apiSvc.dashboard
-      if (dash === true) apiDashboard.value = true
-      else if (dash === false) apiDashboard.value = false
-      else if (dash && typeof dash === 'object') apiDashboard.value = dash.enabled !== false
-      else apiDashboard.value = true
-    } else {
-      apiListen.value = ''
-      apiPort.value = ''
-      apiSecret.value = ''
-      apiDashboard.value = true
+    // 维护模板默认值对象（勾选时才应用到输入框）
+    tplDefaults.value = {
+      mixed: {
+        listen: mixedIn?.listen ?? '',
+        port: mixedIn?.listen_port != null ? String(mixedIn.listen_port) : '',
+      },
+      api: apiSvc
+        ? {
+            listen: apiSvc.listen ?? '',
+            port: apiSvc.listen_port != null ? String(apiSvc.listen_port) : '',
+            secret: apiSvc.secret ?? '',
+            dashboard:
+              apiSvc.dashboard === true ||
+              apiSvc.dashboard === undefined ||
+              (apiSvc.dashboard && typeof apiSvc.dashboard === 'object' && apiSvc.dashboard.enabled !== false),
+          }
+        : { listen: '', port: '', secret: '', dashboard: true },
     }
+
+    // 重置控件：清空输入框，默认只勾选模板第一个 inbound 对应模式（api 默认不勾）
+    mixed.value = false
+    tun.value = false
+    mixedListen.value = ''
+    mixedPort.value = ''
+    apiEnabled.value = false
+    apiListen.value = ''
+    apiPort.value = ''
+    apiSecret.value = ''
+    apiDashboard.value = true
+    if (firstInbound?.type === 'mixed') mixed.value = true
+    else if (firstInbound?.type === 'tun') tun.value = true
+    // 为默认勾选的模式填入模板默认值
+    if (mixed.value) fillMixedFromTemplate()
   } catch (e) {
     error.value = '加载模板默认配置失败: ' + (e as Error).message
   }
@@ -235,7 +278,7 @@ onMounted(async () => {
 
     <div class="section">
       <h2>Mixed 模式</h2>
-      <label class="check-row"><input v-model="mixed" type="checkbox" /> 启用 Mixed</label>
+      <label class="check-row"><input v-model="mixed" type="checkbox" @change="onMixedChange" /> 启用 Mixed</label>
       <div v-if="mixed" class="sub-fields">
         <div class="field">
           <div class="field-title">监听地址</div>
@@ -250,9 +293,9 @@ onMounted(async () => {
     </div>
 
     <div class="section">
-      <h2>Sing-box API（gRPC，默认禁用）</h2>
-      <p class="section-desc">gRPC 服务，供 sing-box 官方客户端与 Dashboard 远程查看和控制本实例。</p>
-      <label class="check-row"><input v-model="apiEnabled" type="checkbox" /> 启用 Sing-box API</label>
+      <h2>Sing-box API</h2>
+      <p class="section-desc">gRPC 服务（默认禁用），供 sing-box 官方客户端与 Dashboard 远程查看和控制本实例。</p>
+      <label class="check-row"><input v-model="apiEnabled" type="checkbox" @change="onApiChange" /> 启用 Sing-box API</label>
       <div v-if="apiEnabled" class="sub-fields">
         <label class="check-row"><input v-model="apiDashboard" type="checkbox" /> 启用 Dashboard（Web 面板）</label>
         <div class="field">
