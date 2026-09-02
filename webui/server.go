@@ -10,12 +10,14 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
-	"github.com/follow1123/sing-box-ctl/config"
 	"github.com/follow1123/sing-box-ctl/converter"
 	"github.com/follow1123/sing-box-ctl/provider"
 	"github.com/follow1123/sing-box-ctl/settings"
@@ -24,6 +26,9 @@ import (
 //go:embed dist
 var distFiles embed.FS
 
+//go:embed default_template.json
+var templateSeedData []byte
+
 const (
 	apiPath          = "/api/providers"
 	apiTemplatesPath = "/api/templates"
@@ -31,17 +36,17 @@ const (
 )
 
 type Server struct {
-	configPath string
-	conf       *config.Config
+	workingDir string
+	host       string
+	port       int
 	server     *http.Server
 }
 
-func New(configPath string, port int) (*Server, error) {
-	conf, err := config.New(configPath)
-	if err != nil {
+func New(workingDir, host string, port int) (*Server, error) {
+	if err := initWorkingDir(workingDir); err != nil {
 		return nil, err
 	}
-	s := &Server{configPath: configPath, conf: conf}
+	s := &Server{workingDir: workingDir, host: host, port: port}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(apiPath, s.providersHandle)
@@ -59,10 +64,48 @@ func New(configPath string, port int) (*Server, error) {
 	mux.HandleFunc("/", s.spaHandle)
 
 	s.server = &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
+		Addr:    net.JoinHostPort(host, strconv.Itoa(port)),
 		Handler: recoverMiddleware(mux),
 	}
 	return s, nil
+}
+
+// initWorkingDir 初始化工作目录（providers/templates 目录），并保证存在一个默认模板
+func initWorkingDir(workingDir string) error {
+	p, err := provider.New(workingDir)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(p.ProvidersDir(), 0700); err != nil {
+		return fmt.Errorf("init providers dir error:\n\t%w", err)
+	}
+	if err := os.MkdirAll(p.TemplatesDir(), 0700); err != nil {
+		return fmt.Errorf("init templates dir error:\n\t%w", err)
+	}
+	// 模板目录为空时初始化默认模板；有模板但无 default 标记时补第一个为默认
+	infos, err := p.ListTemplates()
+	if err != nil {
+		return fmt.Errorf("list templates error:\n\t%w", err)
+	}
+	if len(infos) == 0 {
+		uuid, err := p.AddTemplate("默认模板")
+		if err != nil {
+			return fmt.Errorf("init default template error:\n\t%w", err)
+		}
+		if err := p.SaveTemplate(uuid, templateSeedData); err != nil {
+			return fmt.Errorf("init default template content error:\n\t%w", err)
+		}
+		if err := p.SetDefaultTemplate(uuid); err != nil {
+			return fmt.Errorf("init default template mark error:\n\t%w", err)
+		}
+		return nil
+	}
+	for _, info := range infos {
+		if info.Default {
+			return nil
+		}
+	}
+	return p.SetDefaultTemplate(infos[0].Uuid)
 }
 
 func (s *Server) Serve() error {
@@ -91,7 +134,7 @@ func recoverMiddleware(next http.Handler) http.Handler {
 }
 
 func (s *Server) newProvider() (*provider.Provider, error) {
-	return provider.New(s.configPath)
+	return provider.New(s.workingDir)
 }
 
 // spaHandle 返回前端入口（Vite 构建的 index.html）
@@ -300,7 +343,7 @@ func (s *Server) templatesHandle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// 初始化为内置默认模板内容
-		if err := p.SaveTemplate(uuid, defaultTemplateData()); err != nil {
+		if err := p.SaveTemplate(uuid, templateSeedData); err != nil {
 			handleInternalServerError(w, err)
 			return
 		}
@@ -523,11 +566,6 @@ func parseConfigQuery(q url.Values) (map[settings.SettingName]string, error) {
 		values[settings.StAPIDashboard] = v
 	}
 	return values, nil
-}
-
-// defaultTemplateData 返回默认模板内容（从 config 包 embed 数据）
-func defaultTemplateData() []byte {
-	return config.TemplateData()
 }
 
 func writeJSON(w http.ResponseWriter, data any) {

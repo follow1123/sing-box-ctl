@@ -4,8 +4,7 @@ sing-box-ctl
 sbctl
 sbctl.exe
 
-# 本地测试配置
-config.json
+# 本地运行数据
 working_dir/
 serve.log
 

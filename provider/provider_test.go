@@ -11,13 +11,10 @@ import (
 
 func newProvider(t *testing.T) (*provider.Provider, string) {
 	t.Helper()
-	configPath := filepath.Join(t.TempDir(), "config.json")
 	workingDir := t.TempDir()
-	content := `{"working_dir": "` + workingDir + `"}`
-	require.NoError(t, os.WriteFile(configPath, []byte(content), 0660))
-	p, err := provider.New(configPath)
+	p, err := provider.New(workingDir)
 	require.NoError(t, err)
-	return p, configPath
+	return p, workingDir
 }
 
 func TestAdd(t *testing.T) {
@@ -141,13 +138,13 @@ func TestGet(t *testing.T) {
 
 func TestPersistence(t *testing.T) {
 	// 元数据在文件系统，重新加载后仍能读到
-	p, configPath := newProvider(t)
+	p, workingDir := newProvider(t)
 	_, err := p.Add("aaa", "http://localhost:8752", provider.SourceURL, "hello")
 	require.NoError(t, err)
 	uuid := p.List()[0].Uuid
 	require.NoError(t, p.SetFileName(uuid, "sub.yaml"))
 
-	p2, err := provider.New(configPath)
+	p2, err := provider.New(workingDir)
 	require.NoError(t, err)
 	list := p2.List()
 	require.Len(t, list, 1)

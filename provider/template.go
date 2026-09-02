@@ -18,7 +18,7 @@ type TemplateInfo struct {
 
 // TemplatesDir 返回模板目录
 func (p *Provider) TemplatesDir() string {
-	return filepath.Join(p.config.WorkingDir, "templates")
+	return filepath.Join(p.workingDir, "templates")
 }
 
 // AddTemplate 新建模板，返回模板 uuid。初始内容由调用方通过 SaveTemplate 写入。

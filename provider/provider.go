@@ -2,7 +2,6 @@ package provider
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,44 +14,36 @@ import (
 )
 
 type Provider struct {
-	path   string
-	config *SingBoxCtlConfig
+	workingDir string
 }
 
-func New(path string) (*Provider, error) {
-	config := &SingBoxCtlConfig{}
-
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("read config %s error:\n\t%w", path, err)
-		}
-		if err := json.Unmarshal(data, config); err != nil {
-			return nil, fmt.Errorf("unmarshal json error:\n\t%w", err)
-		}
+// New 以工作目录构造 Provider。支持环境变量展开；相对路径基于当前进程目录解析，
+// 结果归一化为绝对路径。
+func New(workingDir string) (*Provider, error) {
+	if workingDir == "" {
+		return nil, fmt.Errorf("working dir is required")
 	}
-
-	// 解析 working_dir：支持环境变量和相对路径（基于配置文件所在目录）
-	workingDir := os.ExpandEnv(config.WorkingDir)
-	if !filepath.IsAbs(workingDir) {
-		workingDir = filepath.Join(filepath.Dir(path), workingDir)
+	dir := os.ExpandEnv(workingDir)
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve working dir error:\n\t%w", err)
 	}
-	config.WorkingDir = filepath.Clean(workingDir)
-
-	return &Provider{
-		path:   path,
-		config: config,
-	}, nil
+	return &Provider{workingDir: filepath.Clean(abs)}, nil
 }
 
 // WorkingDir 返回解析后的工作目录（绝对路径）
 func (p *Provider) WorkingDir() string {
-	return p.config.WorkingDir
+	return p.workingDir
+}
+
+// ProvidersDir 返回 provider 数据目录
+func (p *Provider) ProvidersDir() string {
+	return filepath.Join(p.workingDir, "providers")
 }
 
 // ProviderDir 返回指定 provider 的数据目录
 func (p *Provider) ProviderDir(uuid string) string {
-	return filepath.Join(p.config.WorkingDir, "providers", uuid)
+	return filepath.Join(p.ProvidersDir(), uuid)
 }
 
 // SubscriptionDir 返回指定 provider 的订阅数据目录
@@ -62,7 +53,7 @@ func (p *Provider) SubscriptionDir(uuid string) string {
 
 // TemplateDir 返回指定模板的数据目录
 func (p *Provider) TemplateDir(uuid string) string {
-	return filepath.Join(p.config.WorkingDir, "templates", uuid)
+	return filepath.Join(p.workingDir, "templates", uuid)
 }
 
 // SaveSubscription 保存订阅内容到 providers/<uuid>/，滚动保留 current/last/old 三份
@@ -230,7 +221,7 @@ func (p *Provider) Get(uuid string) *ProviderConfig {
 
 // List 列出所有 provider
 func (p *Provider) List() []ProviderConfig {
-	entries, err := os.ReadDir(filepath.Join(p.config.WorkingDir, "providers"))
+	entries, err := os.ReadDir(p.ProvidersDir())
 	if err != nil {
 		return nil
 	}
@@ -284,7 +275,7 @@ func (p *Provider) nameExists(name string) bool {
 
 // findByName 按名称查找 provider uuid，不存在返回 ""
 func (p *Provider) findByName(name string) (string, error) {
-	entries, err := os.ReadDir(filepath.Join(p.config.WorkingDir, "providers"))
+	entries, err := os.ReadDir(p.ProvidersDir())
 	if err != nil {
 		return "", err
 	}

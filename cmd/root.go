@@ -13,7 +13,8 @@ const (
 )
 
 type options struct {
-	configPath string
+	workingDir string
+	host       string
 	port       int
 	version    bool
 	command    string
@@ -34,12 +35,12 @@ func Execute() {
 
 	switch opts.command {
 	case "serve":
-		if opts.configPath == "" {
-			fmt.Fprintln(os.Stderr, "error: -c is required")
+		if opts.workingDir == "" {
+			fmt.Fprintln(os.Stderr, "error: -d is required")
 			printUsage()
 			os.Exit(1)
 		}
-		if err := serveCmd(opts.configPath, opts.port); err != nil {
+		if err := serveCmd(opts.workingDir, opts.host, opts.port); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
@@ -60,12 +61,18 @@ func parseArgs(args []string) (*options, error) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
-		case "-c", "--config":
+		case "-d", "--dir":
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("flag %s requires a value", arg)
 			}
 			i++
-			opts.configPath = args[i]
+			opts.workingDir = args[i]
+		case "--listen":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("flag %s requires a value", arg)
+			}
+			i++
+			opts.host = args[i]
 		case "-p", "--port":
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("flag %s requires a value", arg)
@@ -106,8 +113,9 @@ commands:
   help     print this help
 
 flags:
-  -c <path>  path to config file (required for serve)
-  -p <port>  webui port (default 8080)
-  -v         print version
+  -d <dir>        working directory (required for serve)
+  --listen <host> listen address (default all interfaces)
+  -p <port>       webui port (default 8080)
+  -v              print version
 `)
 }
