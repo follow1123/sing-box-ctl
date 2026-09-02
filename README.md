@@ -37,7 +37,7 @@ cd ..
 ```bash
 sbctl serve -d <working_dir> [--listen <host>] [-p <port>]
 # -d        工作目录（必填），存放 providers / templates 数据
-# --listen  监听地址，默认监听所有接口
+# --listen  监听地址，默认 127.0.0.1（仅本机）；局域网访问请指定 --listen 0.0.0.0
 # -p        端口，默认 8080
 ```
 

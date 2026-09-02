@@ -56,7 +56,7 @@ func Execute() {
 }
 
 func parseArgs(args []string) (*options, error) {
-	opts := &options{port: 8080}
+	opts := &options{host: "127.0.0.1", port: 8080}
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -114,7 +114,7 @@ commands:
 
 flags:
   -d <dir>        working directory (required for serve)
-  --listen <host> listen address (default all interfaces)
+  --listen <host> listen address (default 127.0.0.1, use 0.0.0.0 for LAN access)
   -p <port>       webui port (default 8080)
   -v              print version
 `)
