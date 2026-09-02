@@ -147,9 +147,10 @@ proxies:
 		assert.NotContains(t, ob["tag"], "@")
 	}
 
-	// 只保留第一个 inbound
-	assert.Equal(t, 1, len(sb.Inbounds))
+	// inbounds 原样保留（启停由 settings 控制）
+	assert.Equal(t, 2, len(sb.Inbounds))
 	assert.Equal(t, "mixed", sb.Inbounds[0]["type"])
+	assert.Equal(t, "tun", sb.Inbounds[1]["type"])
 
 	// 规则原样（不解析订阅规则）
 	assert.Equal(t, 0, len(sb.DNS.Rules))

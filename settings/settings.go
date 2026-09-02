@@ -42,9 +42,12 @@ type Settings struct {
 }
 
 // New 构建设置器。tmplConf 为模板原始配置（提供默认 mixed/tun inbound、api service）；
-// conf 为订阅转换后的配置（将被修改）。api service 默认移除（禁用），需要时通过 Set 启用。
+// conf 为订阅转换后的配置（将被修改）。api service 与 mixed/tun inbound 默认移除
+// （禁用），需要时通过 Set 启用。
 func New(tmplConf *C.SingBox, conf *C.SingBox) *Settings {
 	removeAPIService(conf)
+	removeInboundByType(conf, "mixed")
+	removeInboundByType(conf, "tun")
 	return &Settings{tmplConf: tmplConf, conf: conf}
 }
 
@@ -348,6 +351,16 @@ func removeAPIService(sb *C.SingBox) {
 	for i := 0; i < len(sb.Services); i++ {
 		if sb.Services[i]["type"] == "api" {
 			sb.Services = slices.Delete(sb.Services, i, i+1)
+			i--
+		}
+	}
+}
+
+// removeInboundByType 移除 conf 中指定类型的所有 inbound（可选模式默认关闭）
+func removeInboundByType(sb *C.SingBox, inboundType string) {
+	for i := 0; i < len(sb.Inbounds); i++ {
+		if sb.Inbounds[i]["type"] == inboundType {
+			sb.Inbounds = slices.Delete(sb.Inbounds, i, i+1)
 			i--
 		}
 	}

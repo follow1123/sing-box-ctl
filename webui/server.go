@@ -449,22 +449,34 @@ func (s *Server) configHandle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	platform := r.URL.Query().Get("platform")
+
 	// 解析 URL 参数并应用到转换结果（内存中，无中间文件）
 	values, err := parseConfigQuery(r.URL.Query())
 	if err != nil {
 		handleError(w, err, http.StatusBadRequest)
 		return
 	}
+	// Android 必须使用 tun：即使 URL 中删除了 tun 参数也强制启用
+	if platform == "android" {
+		values[settings.StTunStatus] = "true"
+	}
 	st := settings.New(tmplConf, sb)
 	if err := st.SetMap(values); err != nil {
 		handleError(w, err, http.StatusBadRequest)
 		return
 	}
-	if platform := r.URL.Query().Get("platform"); platform != "" {
+	if platform != "" {
 		if err := st.SetPlatform(platform); err != nil {
 			handleError(w, err, http.StatusBadRequest)
 			return
 		}
+	}
+
+	// 校验：输出配置至少需要一个 inbound（tun/mixed 至少启用其一，模板常驻 inbound 除外）
+	if len(st.GetConfig().Inbounds) == 0 {
+		handleError(w, fmt.Errorf("no inbound in output config, enable at least one of tun/mixed"), http.StatusBadRequest)
+		return
 	}
 
 	jsonData, err := st.ToJson(true)

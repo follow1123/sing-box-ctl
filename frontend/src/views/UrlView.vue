@@ -11,6 +11,8 @@ const error = ref('')
 const providerUuid = ref('')
 const templateUuid = ref('')
 const platform = ref('windows')
+// Android 必须使用 Tun：此时 Tun 开关被强制开启且不可取消
+const tunDisabled = computed(() => platform.value === 'android')
 const tun = ref(false)
 const mixed = ref(false)
 const mixedListen = ref('')
@@ -23,6 +25,10 @@ const apiPort = ref('')
 const apiSecret = ref('')
 // dashboard 为 api service 的子配置，默认开启，仅在关闭时输出 api-dashboard=false
 const apiDashboard = ref(true)
+// 模板是否含常驻 inbound（mixed/tun 之外，无需开关也能生效）
+const hasOtherInbound = ref(false)
+// 模板是否含 tun inbound（Android 平台必需）
+const hasTun = ref(false)
 const importUrlInput = ref('')
 
 const url = computed(() => buildUrl())
@@ -67,14 +73,74 @@ function importFromUrl(raw: string): void {
     apiListen.value = q.get('api-listen') || ''
     apiPort.value = q.get('api-port') || ''
     apiSecret.value = q.get('api-secret') || ''
+    syncPlatformState()
   } catch (e) {
     error.value = '导入失败: ' + (e as Error).message
+  }
+}
+
+/** 平台状态同步：Android 强制启用 Tun */
+function syncPlatformState(): void {
+  if (platform.value === 'android') tun.value = true
+}
+
+function onPlatformChange(): void {
+  syncPlatformState()
+}
+
+/** 从模板读取默认配置并回填页面（模板内的 mixed/tun/api inbound 默认值） */
+async function applyTemplateDefaults(): Promise<void> {
+  if (!templateUuid.value) return
+  try {
+    const data = (await api<Record<string, any>>('/api/templates/' + templateUuid.value)) ?? {}
+    const inbounds: any[] = data.inbounds ?? []
+    const mixedIn = inbounds.find((i) => i.type === 'mixed')
+    const tunIn = inbounds.find((i) => i.type === 'tun')
+    // 模板按默认平台（windows）编写，切换模板时平台复位
+    platform.value = 'windows'
+    syncPlatformState()
+    hasTun.value = !!tunIn
+    mixed.value = !!mixedIn
+    mixedListen.value = mixedIn?.listen ?? ''
+    mixedPort.value = mixedIn?.listen_port != null ? String(mixedIn.listen_port) : ''
+    tun.value = !!tunIn
+    // mixed/tun 之外视为常驻 inbound，存在时无需勾选也能生成有效配置
+    hasOtherInbound.value = inbounds.some((i) => i.type !== 'mixed' && i.type !== 'tun')
+
+    const services: any[] = data.services ?? []
+    const apiSvc = services.find((s) => s.type === 'api')
+    apiEnabled.value = !!apiSvc
+    if (apiSvc) {
+      apiListen.value = apiSvc.listen ?? ''
+      apiPort.value = apiSvc.listen_port != null ? String(apiSvc.listen_port) : ''
+      apiSecret.value = apiSvc.secret ?? ''
+      const dash = apiSvc.dashboard
+      if (dash === true) apiDashboard.value = true
+      else if (dash === false) apiDashboard.value = false
+      else if (dash && typeof dash === 'object') apiDashboard.value = dash.enabled !== false
+      else apiDashboard.value = true
+    } else {
+      apiListen.value = ''
+      apiPort.value = ''
+      apiSecret.value = ''
+      apiDashboard.value = true
+    }
+  } catch (e) {
+    error.value = '加载模板默认配置失败: ' + (e as Error).message
   }
 }
 
 async function copyUrl(): Promise<void> {
   if (!providerUuid.value) {
     error.value = '请先选择 provider'
+    return
+  }
+  if (!tun.value && !mixed.value && !hasOtherInbound.value) {
+    error.value = '需要至少启用 Tun 或 Mixed 一种模式'
+    return
+  }
+  if (platform.value === 'android' && !hasTun.value) {
+    error.value = '当前模板没有 Tun inbound，Android 无法使用'
     return
   }
   try {
@@ -96,6 +162,14 @@ function openUrl(): void {
     error.value = '请先选择 provider'
     return
   }
+  if (!tun.value && !mixed.value && !hasOtherInbound.value) {
+    error.value = '需要至少启用 Tun 或 Mixed 一种模式'
+    return
+  }
+  if (platform.value === 'android' && !hasTun.value) {
+    error.value = '当前模板没有 Tun inbound，Android 无法使用'
+    return
+  }
   window.open(url.value, '_blank')
 }
 
@@ -109,6 +183,8 @@ onMounted(async () => {
     templates.value = ts
     const def = ts.find((t) => t.default)
     if (def) templateUuid.value = def.uuid
+    // 初始回填默认模板配置
+    await applyTemplateDefaults()
   } catch (e) {
     error.value = '加载数据失败: ' + (e as Error).message
   }
@@ -132,7 +208,7 @@ onMounted(async () => {
       </div>
       <div class="field">
         <label>模板</label>
-        <select v-model="templateUuid">
+        <select v-model="templateUuid" @change="applyTemplateDefaults">
           <option v-for="t in templates" :key="t.uuid" :value="t.uuid">
             {{ t.name }}{{ t.default ? '（默认）' : '' }}
           </option>
@@ -144,16 +220,17 @@ onMounted(async () => {
 
     <div class="section">
       <h2>Platform</h2>
-      <select v-model="platform">
+      <select v-model="platform" @change="onPlatformChange">
         <option value="windows">Windows</option>
         <option value="linux">Linux</option>
         <option value="android">Android</option>
       </select>
+      <p v-if="platform === 'android'" class="section-desc">Android 必须使用 Tun 模式，Tun 开关已强制开启。</p>
     </div>
 
     <div class="section">
       <h2>Tun 模式</h2>
-      <label class="check-row"><input v-model="tun" type="checkbox" /> 启用 Tun</label>
+      <label class="check-row"><input v-model="tun" type="checkbox" :disabled="tunDisabled" /> 启用 Tun</label>
     </div>
 
     <div class="section">

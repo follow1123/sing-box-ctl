@@ -23,8 +23,8 @@ func New(singboxTemplateConfigPath string) (*Converter, error) {
 
 // Convert 将 clash 订阅转换为 sing-box 配置：
 //   - 只解析订阅中的节点（proxies），不解析订阅规则（rules）
-//   - 模板的 dns/route/rule_set 原样保留
-//   - inbounds 只保留第一个
+//   - 模板的 dns/route/rule_set、inbounds、services 等原样保留
+//   - inbounds 的启停由 settings 根据 URL 参数控制，这里不做截断
 //   - outbounds 中 tag 含 @ 表达式的组会被填充节点（见 resolveOutboundExpr）
 func (c *Converter) Convert(clashData []byte) (*SingBox, error) {
 	clash := &Clash{}
@@ -37,12 +37,6 @@ func (c *Converter) Convert(clashData []byte) (*SingBox, error) {
 	if len(nodeNames) == 0 {
 		return nil, fmt.Errorf("no valid proxies in subscription")
 	}
-
-	// inbounds 只保留第一个（模板中默认的放第一个）
-	if len(c.tmpl.Inbounds) == 0 {
-		return nil, fmt.Errorf("template has no inbounds")
-	}
-	c.tmpl.Inbounds = c.tmpl.Inbounds[:1]
 
 	// 填充 outbounds 中的 @ 表达式组
 	for _, ob := range c.tmpl.Outbounds {
