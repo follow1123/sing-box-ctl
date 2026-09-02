@@ -4,6 +4,10 @@ sing-box-ctl
 sbctl
 sbctl.exe
 
+# 构建产物
+sbctl-new*
+dist/
+
 # 本地运行数据
 working_dir/
 serve.log

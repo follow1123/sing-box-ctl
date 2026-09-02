@@ -43,10 +43,16 @@ type Server struct {
 }
 
 func New(workingDir, host string, port int) (*Server, error) {
-	if err := initWorkingDir(workingDir); err != nil {
+	// 先解析为绝对路径，便于后续日志与每次请求重建 provider 时保持一致
+	p, err := provider.New(workingDir)
+	if err != nil {
 		return nil, err
 	}
-	s := &Server{workingDir: workingDir, host: host, port: port}
+	absDir := p.WorkingDir()
+	if err := initWorkingDir(absDir); err != nil {
+		return nil, err
+	}
+	s := &Server{workingDir: absDir, host: host, port: port}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(apiPath, s.providersHandle)
@@ -109,6 +115,7 @@ func initWorkingDir(workingDir string) error {
 }
 
 func (s *Server) Serve() error {
+	log.Printf("working directory: %s", s.workingDir)
 	log.Printf("webui started on %s", s.server.Addr)
 	if err := s.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("start webui server error:\n\t%w", err)
