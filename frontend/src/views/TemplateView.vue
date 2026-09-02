@@ -11,6 +11,8 @@ const currentUuid = ref<string | null>(null)
 const currentName = ref('')
 const error = ref('')
 const notice = ref('')
+// 模板约定提示框：默认收起，避免占编辑空间
+const hintOpen = ref(false)
 
 async function loadList(): Promise<void> {
   try {
@@ -135,6 +137,27 @@ onMounted(loadList)
         <span class="ok" v-if="notice">{{ notice }}</span>
         <span class="error" v-else-if="error">{{ error }}</span>
       </div>
+      <div class="tpl-hint">
+        <div class="hint-header" @click="hintOpen = !hintOpen">
+          <span>模板约定</span>
+          <span>{{ hintOpen ? '收起 ▲' : '展开 ▼' }}</span>
+        </div>
+        <div v-show="hintOpen" class="hint-body">
+          <ol>
+            <li>URL 页默认勾选 <code>inbounds</code> 第一个类型作为默认模式，请把常用模式放第一个。</li>
+            <li>建议同时配置 mixed 与 tun 两种 inbound（Android 强制 Tun）。</li>
+            <li>
+              outbound 的 tag 支持按关键词筛选订阅节点：
+              <ul>
+                <li><code>组名@all</code> 组包含全部节点</li>
+                <li><code>组名@keywords=节点A,节点B</code> 仅包含名称命中任一关键词的节点</li>
+                <li><code>组名@exclude=节点C</code> 排除名称命中任一关键词的节点</li>
+                <li>不带 <code>@</code> 的组原样保留，需自行维护 outbounds</li>
+              </ul>
+            </li>
+          </ol>
+        </div>
+      </div>
       <div ref="editorEl" id="editor"></div>
     </div>
   </main>
@@ -233,6 +256,47 @@ button:hover {
   border: 1px solid var(--surface-3);
   border-radius: var(--radius-2);
   overflow: hidden;
+}
+.tpl-hint {
+  border: 1px solid var(--surface-3);
+  border-radius: var(--radius-2);
+  background: var(--surface-2);
+  margin-bottom: 0.6rem;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+  max-width: 100%;
+}
+.hint-header {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+  color: var(--text-2);
+  font-weight: var(--font-weight-6);
+  user-select: none;
+}
+.hint-body {
+  padding: 0 0.8rem 0.6rem;
+  color: var(--text-1);
+  border-top: 1px solid var(--surface-3);
+}
+.hint-body ol {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+}
+.hint-body li {
+  margin: 0.35rem 0;
+}
+.hint-body ul {
+  margin: 0.2rem 0;
+  padding-left: 1.2rem;
+}
+.hint-body code {
+  background: var(--surface-3);
+  padding: 0 4px;
+  border-radius: 4px;
+  font-family: var(--font-monospace-code);
+  font-size: 0.8rem;
 }
 .error {
   color: var(--red-7);

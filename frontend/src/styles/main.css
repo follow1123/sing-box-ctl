@@ -44,3 +44,9 @@ body {
   flex-direction: column;
   overflow: hidden;
 }
+
+/* 应用型界面不需要文章阅读限宽：解除 normalize 对排版元素的最大宽度约束
+   （否则 li/p/标题会按 45ch/60ch 提前换行，与容器实际宽度无关） */
+:where(p, ul, ol, dl, li, dd, figcaption, h1, h2, h3, h4, h5, h6, dt, td, blockquote) {
+  max-inline-size: none;
+}
