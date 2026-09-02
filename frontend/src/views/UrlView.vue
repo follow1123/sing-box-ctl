@@ -13,12 +13,16 @@ const templateUuid = ref('')
 const platform = ref('windows')
 const tun = ref(false)
 const mixed = ref(false)
+const mixedListen = ref('')
 const mixedPort = ref('')
 const sysProxy = ref(false)
-const share = ref(false)
-const webui = ref(false)
-const webuiPort = ref('')
-const webuiSecret = ref('')
+// sing-box api service（services.api，gRPC）
+const apiEnabled = ref(false)
+const apiListen = ref('')
+const apiPort = ref('')
+const apiSecret = ref('')
+// dashboard 为 api service 的子配置，默认开启，仅在关闭时输出 api-dashboard=false
+const apiDashboard = ref(true)
 const importUrlInput = ref('')
 
 const url = computed(() => buildUrl())
@@ -31,13 +35,16 @@ function buildUrl(): string {
   if (tun.value) params.push('tun')
   if (mixed.value) {
     params.push('mixed')
+    if (mixedListen.value) params.push('mixed-listen=' + mixedListen.value)
     if (mixedPort.value) params.push('mixed-port=' + mixedPort.value)
     if (sysProxy.value) params.push('sys-proxy')
-    if (share.value) params.push('share')
   }
-  if (webui.value) {
-    if (webuiPort.value) params.push('webui-port=' + webuiPort.value)
-    if (webuiSecret.value) params.push('webui-secret=' + encodeURIComponent(webuiSecret.value))
+  if (apiEnabled.value) {
+    params.push('api')
+    if (!apiDashboard.value) params.push('api-dashboard=false')
+    if (apiListen.value) params.push('api-listen=' + apiListen.value)
+    if (apiPort.value) params.push('api-port=' + apiPort.value)
+    if (apiSecret.value) params.push('api-secret=' + encodeURIComponent(apiSecret.value))
   }
   return location.origin + '/config/' + providerUuid.value + (params.length ? '?' + params.join('&') : '')
 }
@@ -52,12 +59,14 @@ function importFromUrl(raw: string): void {
     if (q.has('platform')) platform.value = q.get('platform') || 'windows'
     tun.value = q.has('tun')
     mixed.value = q.has('mixed')
+    mixedListen.value = q.get('mixed-listen') || ''
     mixedPort.value = q.get('mixed-port') || ''
     sysProxy.value = q.has('sys-proxy')
-    share.value = q.has('share')
-    webui.value = q.has('webui-port') || q.has('webui-secret')
-    webuiPort.value = q.get('webui-port') || ''
-    webuiSecret.value = q.get('webui-secret') || ''
+    apiEnabled.value = q.has('api')
+    apiDashboard.value = q.get('api-dashboard') !== 'false'
+    apiListen.value = q.get('api-listen') || ''
+    apiPort.value = q.get('api-port') || ''
+    apiSecret.value = q.get('api-secret') || ''
   } catch (e) {
     error.value = '导入失败: ' + (e as Error).message
   }
@@ -152,25 +161,34 @@ onMounted(async () => {
       <label class="check-row"><input v-model="mixed" type="checkbox" /> 启用 Mixed</label>
       <div v-if="mixed" class="sub-fields">
         <div class="field">
-          <div class="field-title">Mixed 端口</div>
+          <div class="field-title">监听地址</div>
+          <input v-model="mixedListen" type="text" placeholder="127.0.0.1" />
+        </div>
+        <div class="field">
+          <div class="field-title">端口</div>
           <input v-model="mixedPort" type="number" placeholder="7899" />
         </div>
         <label class="check-row"><input v-model="sysProxy" type="checkbox" /> 系统代理</label>
-        <label class="check-row"><input v-model="share" type="checkbox" /> 局域网共享</label>
       </div>
     </div>
 
     <div class="section">
-      <h2>Web UI（clash_api，默认禁用）</h2>
-      <label class="check-row"><input v-model="webui" type="checkbox" /> 启用 Web UI</label>
-      <div v-if="webui" class="sub-fields">
+      <h2>Sing-box API（gRPC，默认禁用）</h2>
+      <p class="section-desc">gRPC 服务，供 sing-box 官方客户端与 Dashboard 远程查看和控制本实例。</p>
+      <label class="check-row"><input v-model="apiEnabled" type="checkbox" /> 启用 Sing-box API</label>
+      <div v-if="apiEnabled" class="sub-fields">
+        <label class="check-row"><input v-model="apiDashboard" type="checkbox" /> 启用 Dashboard（Web 面板）</label>
+        <div class="field">
+          <div class="field-title">监听地址</div>
+          <input v-model="apiListen" type="text" placeholder="127.0.0.1" />
+        </div>
         <div class="field">
           <div class="field-title">端口</div>
-          <input v-model="webuiPort" type="number" placeholder="9090" />
+          <input v-model="apiPort" type="number" placeholder="9090" />
         </div>
         <div class="field">
           <div class="field-title">Secret（可选）</div>
-          <input v-model="webuiSecret" type="text" placeholder="留空则不设置" />
+          <input v-model="apiSecret" type="text" placeholder="留空则不设置" />
         </div>
       </div>
     </div>
@@ -238,6 +256,11 @@ button:hover {
   font-size: 0.9rem;
   margin-bottom: 0.8rem;
   color: var(--text-2);
+}
+.section-desc {
+  font-size: 0.8rem;
+  color: var(--text-2);
+  margin: -0.4rem 0 0.6rem;
 }
 .field-title {
   font-weight: var(--font-weight-6);

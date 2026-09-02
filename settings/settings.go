@@ -3,7 +3,6 @@ package settings
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"slices"
 	"strconv"
 
@@ -13,14 +12,19 @@ import (
 type SettingName string
 
 const (
-	StWebuiStatus         SettingName = "webui.status"
-	StWebuiPort           SettingName = "webui.port"
-	StWebuiSecret         SettingName = "webui.secret"
+	// sing-box api service（services 中 type=api）
+	StAPIStatus    SettingName = "api.status"
+	StAPIListen    SettingName = "api.listen"
+	StAPIPort      SettingName = "api.port"
+	StAPISecret    SettingName = "api.secret"
+	StAPIDashboard SettingName = "api.dashboard"
+	// mixed inbound
 	StMixedStatus         SettingName = "mixed.status"
+	StMixedListen         SettingName = "mixed.listen"
 	StMixedPort           SettingName = "mixed.port"
 	StMixedSysProxyStatus SettingName = "mixed.system.proxy.status"
-	StMixedShareStatus    SettingName = "mixed.share.status"
-	StTunStatus           SettingName = "tun.status"
+	// tun inbound
+	StTunStatus SettingName = "tun.status"
 )
 
 type Platform = string
@@ -37,10 +41,10 @@ type Settings struct {
 	conf     *C.SingBox
 }
 
-// New 构建设置器。tmplConf 为模板原始配置（提供默认 mixed/tun inbound、clash_api）；
-// conf 为订阅转换后的配置（将被修改）。webui（clash_api）默认禁用，需要时通过 Set 启用。
+// New 构建设置器。tmplConf 为模板原始配置（提供默认 mixed/tun inbound、api service）；
+// conf 为订阅转换后的配置（将被修改）。api service 默认移除（禁用），需要时通过 Set 启用。
 func New(tmplConf *C.SingBox, conf *C.SingBox) *Settings {
-	conf.Experimental.ClashAPI = nil
+	removeAPIService(conf)
 	return &Settings{tmplConf: tmplConf, conf: conf}
 }
 
@@ -58,26 +62,37 @@ func (s *Settings) Set(name SettingName, value string) error {
 		return fmt.Errorf("config not init")
 	}
 	switch name {
-	case StWebuiStatus:
+	case StAPIStatus:
 		status, err := strconv.ParseBool(value)
 		if err != nil {
-			return fmt.Errorf("invalid webui status: %s %w\n\t", value, err)
+			return fmt.Errorf("invalid api status: %s %w\n\t", value, err)
 		}
 		if status {
-			s.initWebuiSettings()
+			s.initAPIService()
 		} else {
-			s.conf.Experimental.ClashAPI = nil
+			removeAPIService(s.conf)
 		}
-	case StWebuiPort:
+	case StAPIListen:
+		idx := s.initAPIService()
+		s.conf.Services[idx]["listen"] = value
+	case StAPIPort:
 		port, err := strconv.ParseUint(value, 10, 16)
 		if err != nil {
-			return fmt.Errorf("invalid webui port: %s %w\n\t", value, err)
+			return fmt.Errorf("invalid api port: %s %w\n\t", value, err)
 		}
-		s.initWebuiSettings()
-		s.conf.Experimental.ClashAPI.ExternalController = fmt.Sprintf("127.0.0.1:%d", port)
-	case StWebuiSecret:
-		s.initWebuiSettings()
-		s.conf.Experimental.ClashAPI.Secret = value
+		idx := s.initAPIService()
+		s.conf.Services[idx]["listen_port"] = port
+	case StAPISecret:
+		idx := s.initAPIService()
+		s.conf.Services[idx]["secret"] = value
+	case StAPIDashboard:
+		status, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid api dashboard status: %s %w\n\t", value, err)
+		}
+		idx := s.initAPIService()
+		dashboard := apiServiceDashboard(s.conf.Services[idx])
+		dashboard["enabled"] = status
 	case StMixedStatus:
 		status, err := strconv.ParseBool(value)
 		if err != nil {
@@ -97,6 +112,9 @@ func (s *Settings) Set(name SettingName, value string) error {
 				s.conf.Inbounds = slices.Delete(s.conf.Inbounds, idx, idx+1)
 			}
 		}
+	case StMixedListen:
+		idx := s.initMixedSettings()
+		s.conf.Inbounds[idx]["listen"] = value
 	case StMixedPort:
 		port, err := strconv.ParseUint(value, 10, 16)
 		if err != nil {
@@ -111,18 +129,6 @@ func (s *Settings) Set(name SettingName, value string) error {
 		}
 		idx := s.initMixedSettings()
 		s.conf.Inbounds[idx]["set_system_proxy"] = status
-	case StMixedShareStatus:
-		status, err := strconv.ParseBool(value)
-		if err != nil {
-			return fmt.Errorf("invalid proxy share status: %s %w\n\t", value, err)
-		}
-		idx := s.initMixedSettings()
-
-		if status {
-			s.conf.Inbounds[idx]["listen"] = "::"
-		} else {
-			s.conf.Inbounds[idx]["listen"] = "127.0.0.1"
-		}
 	case StTunStatus:
 		status, err := strconv.ParseBool(value)
 		if err != nil {
@@ -154,8 +160,31 @@ func (s *Settings) GetBool(name SettingName) (bool, error) {
 		return false, fmt.Errorf("config not init")
 	}
 	switch name {
-	case StWebuiStatus:
-		return s.conf.Experimental.ClashAPI != nil && s.conf.Experimental.ClashAPI.ExternalController != "", nil
+	case StAPIStatus:
+		return findAPIService(s.conf) >= 0, nil
+	case StAPIDashboard:
+		idx := findAPIService(s.conf)
+		if idx < 0 {
+			return false, fmt.Errorf("api service is not enabled")
+		}
+		dashboard, exists := s.conf.Services[idx]["dashboard"]
+		if !exists {
+			// 模板未配置 dashboard 时按 sing-box 默认（启用）处理
+			return true, nil
+		}
+		switch v := dashboard.(type) {
+		case map[string]any:
+			enabled, ok := v["enabled"].(bool)
+			if !ok {
+				return true, nil
+			}
+			return enabled, nil
+		case bool:
+			return v, nil
+		default:
+			// dashboard 配置为 string（面板目录）时视为启用
+			return true, nil
+		}
 	case StMixedStatus:
 		return indexOfInboundType(s.conf, "mixed") >= 0, nil
 	case StMixedSysProxyStatus:
@@ -172,20 +201,6 @@ func (s *Settings) GetBool(name SettingName) (bool, error) {
 			return false, fmt.Errorf("invalid system proxy value in config")
 		}
 		return systemProxyStatus, nil
-	case StMixedShareStatus:
-		idx := indexOfInboundType(s.conf, "mixed")
-		if idx < 0 {
-			return false, fmt.Errorf("mixed mode is not enabled")
-		}
-		listenValue, exists := s.conf.Inbounds[idx]["listen"]
-		if !exists {
-			return false, nil
-		}
-		listen, ok := listenValue.(string)
-		if !ok {
-			return false, fmt.Errorf("invalid listen value in config")
-		}
-		return listen == "::", nil
 	case StTunStatus:
 		return indexOfInboundType(s.conf, "tun") >= 0, nil
 	default:
@@ -198,20 +213,12 @@ func (s *Settings) GetUint16(name SettingName) (uint16, error) {
 		return 0, fmt.Errorf("config not init")
 	}
 	switch name {
-	case StWebuiPort:
-		if s.conf.Experimental.ClashAPI == nil {
-			return 0, fmt.Errorf("webui is not enabled")
+	case StAPIPort:
+		idx := findAPIService(s.conf)
+		if idx < 0 {
+			return 0, fmt.Errorf("api service is not enabled")
 		}
-		addr := s.conf.Experimental.ClashAPI.ExternalController
-		_, portStr, err := net.SplitHostPort(addr)
-		if err != nil {
-			return 0, fmt.Errorf("split host port error:\n\t%w", err)
-		}
-		port, err := strconv.ParseUint(portStr, 10, 16)
-		if err != nil {
-			return 0, fmt.Errorf("parse port error:\n\t%w", err)
-		}
-		return uint16(port), nil
+		return uint16FromAny(s.conf.Services[idx]["listen_port"])
 	case StMixedPort:
 		idx := indexOfInboundType(s.conf, "mixed")
 		if idx < 0 {
@@ -221,13 +228,7 @@ func (s *Settings) GetUint16(name SettingName) (uint16, error) {
 		if !exists {
 			return 0, fmt.Errorf("no listen port in mixed inbound")
 		}
-		portStr := fmt.Sprintf("%v", portValue)
-
-		port, err := strconv.ParseUint(portStr, 10, 16)
-		if err != nil {
-			return 0, fmt.Errorf("parse mixed inoubnd listen port error:\n\t%w", err)
-		}
-		return uint16(port), nil
+		return uint16FromAny(portValue)
 	default:
 		return 0, fmt.Errorf("invalid name %s", name)
 	}
@@ -238,11 +239,13 @@ func (s *Settings) GetString(name SettingName) (string, error) {
 		return "", fmt.Errorf("config not init")
 	}
 	switch name {
-	case StWebuiSecret:
-		if s.conf.Experimental.ClashAPI == nil {
-			return "", fmt.Errorf("webui is not enabled")
+	case StAPISecret:
+		idx := findAPIService(s.conf)
+		if idx < 0 {
+			return "", fmt.Errorf("api service is not enabled")
 		}
-		return s.conf.Experimental.ClashAPI.Secret, nil
+		secret, _ := s.conf.Services[idx]["secret"].(string)
+		return secret, nil
 	default:
 		return "", fmt.Errorf("invalid name %s", name)
 	}
@@ -262,16 +265,18 @@ func (s *Settings) initMixedSettings() int {
 	return idx
 }
 
-func (s *Settings) initWebuiSettings() {
-	// clash_api 为空或 external_controller 为空表示禁用状态
-	// 优先复制模板中的配置，模板没有时构造空结构
-	if s.conf.Experimental.ClashAPI == nil || s.conf.Experimental.ClashAPI.ExternalController == "" {
-		if s.tmplConf.Experimental.ClashAPI != nil {
-			s.conf.Experimental.ClashAPI = cloneClashAPI(s.tmplConf.Experimental.ClashAPI)
-		} else {
-			s.conf.Experimental.ClashAPI = &C.ClashAPI{}
-		}
+// initAPIService 确保 conf 中存在 api service；没有时优先复制模板中的，
+// 模板也没有时构造默认配置。
+func (s *Settings) initAPIService() int {
+	if idx := findAPIService(s.conf); idx >= 0 {
+		return idx
 	}
+	if tmplIdx := findAPIService(s.tmplConf); tmplIdx >= 0 {
+		s.conf.Services = append(s.conf.Services, cloneService(s.tmplConf.Services[tmplIdx]))
+		return len(s.conf.Services) - 1
+	}
+	s.conf.Services = append(s.conf.Services, defaultAPIService())
+	return len(s.conf.Services) - 1
 }
 
 func (s *Settings) SetPlatform(platform Platform) error {
@@ -328,6 +333,46 @@ func indexOfInboundType(sb *C.SingBox, inboundType string) int {
 	return -1
 }
 
+// findAPIService 返回 conf 中 type=api 的 service 下标，不存在返回 -1
+func findAPIService(sb *C.SingBox) int {
+	for i, service := range sb.Services {
+		if service["type"] == "api" {
+			return i
+		}
+	}
+	return -1
+}
+
+// removeAPIService 移除 conf 中所有 type=api 的 service（禁用 api service）
+func removeAPIService(sb *C.SingBox) {
+	for i := 0; i < len(sb.Services); i++ {
+		if sb.Services[i]["type"] == "api" {
+			sb.Services = slices.Delete(sb.Services, i, i+1)
+			i--
+		}
+	}
+}
+
+// apiServiceDashboard 获取（必要时创建）api service 的 dashboard 配置对象
+func apiServiceDashboard(service map[string]any) map[string]any {
+	if dashboard, ok := service["dashboard"].(map[string]any); ok {
+		return dashboard
+	}
+	dashboard := map[string]any{}
+	service["dashboard"] = dashboard
+	return dashboard
+}
+
+// defaultAPIService 模板中没有 api service 时的兜底默认
+func defaultAPIService() map[string]any {
+	return map[string]any{
+		"type":        "api",
+		"listen":      "127.0.0.1",
+		"listen_port": 9090,
+		"dashboard":   map[string]any{"enabled": true},
+	}
+}
+
 // cloneInbound 深拷贝 inbound，避免修改污染模板配置
 func cloneInbound(inb map[string]any) map[string]any {
 	data, err := json.Marshal(inb)
@@ -341,18 +386,25 @@ func cloneInbound(inb map[string]any) map[string]any {
 	return out
 }
 
-// cloneClashAPI 深拷贝 clash_api 配置
-func cloneClashAPI(src *C.ClashAPI) *C.ClashAPI {
-	if src == nil {
-		return nil
-	}
+// cloneService 深拷贝 api service 配置，避免修改污染模板配置
+func cloneService(src map[string]any) map[string]any {
 	data, err := json.Marshal(src)
 	if err != nil {
-		return &C.ClashAPI{}
+		return src
 	}
-	var out C.ClashAPI
+	var out map[string]any
 	if err := json.Unmarshal(data, &out); err != nil {
-		return &C.ClashAPI{}
+		return src
 	}
-	return &out
+	return out
+}
+
+// uint16FromAny 将配置中的端口值（json number/整数）转换为 uint16
+func uint16FromAny(value any) (uint16, error) {
+	portStr := fmt.Sprintf("%v", value)
+	port, err := strconv.ParseUint(portStr, 10, 16)
+	if err != nil {
+		return 0, fmt.Errorf("parse listen port error:\n\t%w", err)
+	}
+	return uint16(port), nil
 }

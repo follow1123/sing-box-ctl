@@ -3,6 +3,8 @@ package converter
 type SingBox struct {
 	Log          *Log             `json:"log,omitempty"`
 	Experimental *Experimental    `json:"experimental,omitempty"`
+	HttpClients  []map[string]any `json:"http_clients,omitempty"`
+	Services     []map[string]any `json:"services,omitempty"`
 	DNS          *DNS             `json:"dns,omitempty"`
 	Inbounds     []map[string]any `json:"inbounds,omitempty"`
 	Outbounds    []map[string]any `json:"outbounds,omitempty"`
@@ -10,20 +12,8 @@ type SingBox struct {
 }
 
 type Experimental struct {
-	ClashAPI  *ClashAPI      `json:"clash_api,omitempty"`
 	CacheFile map[string]any `json:"cache_file,omitempty"`
 	V2rayApi  map[string]any `json:"v2ray_api,omitempty"`
-}
-
-type ClashAPI struct {
-	ExternalController               string   `json:"external_controller,omitempty"`
-	ExternalUI                       string   `json:"external_ui,omitempty"`
-	ExternalUIDownloadUrl            string   `json:"external_ui_download_url,omitempty"`
-	ExternalUIDownloadDetour         string   `json:"external_ui_download_detour,omitempty"`
-	Secret                           string   `json:"secret,omitempty"`
-	DefaultMode                      string   `json:"default_mode,omitempty"`
-	AccessControlAllowOrigin         []string `json:"access_control_allow_origin,omitempty"`
-	AccessControlAllowPrivateNetwork bool     `json:"access_control_allow_private_network,omitempty"`
 }
 
 type DNS struct {
@@ -50,6 +40,7 @@ type Route struct {
 	OverrideAndroidVpn         bool             `json:"override_android_vpn,omitempty"`
 	DefaultInterface           string           `json:"default_interface,omitempty"`
 	DefaultMark                int              `json:"default_mark,omitempty"`
+	DefaultHttpClient         string           `json:"default_http_client,omitempty"`
 	FindProcess                bool             `json:"find_process,omitempty"`
 	FindNeighbor               bool             `json:"find_neighbor,omitempty"`
 	DhcpLeaseFiles             []string         `json:"dhcp_lease_files,omitempty"`

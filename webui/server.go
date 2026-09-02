@@ -425,7 +425,7 @@ func (s *Server) configHandle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 读取模板原始配置（settings 需要默认 mixed/tun inbound、clash_api）
+	// 读取模板原始配置（settings 需要默认 mixed/tun inbound、api service）
 	tmplData, err := p.ReadTemplate(template)
 	if err != nil {
 		handleError(w, err, http.StatusNotFound)
@@ -485,20 +485,30 @@ func parseConfigQuery(q url.Values) (map[settings.SettingName]string, error) {
 	if _, ok := q["mixed"]; ok {
 		values[settings.StMixedStatus] = "true"
 	}
+	if v := q.Get("mixed-listen"); v != "" {
+		values[settings.StMixedListen] = v
+	}
 	if v := q.Get("mixed-port"); v != "" {
 		values[settings.StMixedPort] = v
 	}
 	if _, ok := q["sys-proxy"]; ok {
 		values[settings.StMixedSysProxyStatus] = "true"
 	}
-	if _, ok := q["share"]; ok {
-		values[settings.StMixedShareStatus] = "true"
+	// sing-box api service（services.api），dashboard 为其子配置
+	if _, ok := q["api"]; ok {
+		values[settings.StAPIStatus] = "true"
 	}
-	if v := q.Get("webui-port"); v != "" {
-		values[settings.StWebuiPort] = v
+	if v := q.Get("api-listen"); v != "" {
+		values[settings.StAPIListen] = v
 	}
-	if v := q.Get("webui-secret"); v != "" {
-		values[settings.StWebuiSecret] = v
+	if v := q.Get("api-port"); v != "" {
+		values[settings.StAPIPort] = v
+	}
+	if v := q.Get("api-secret"); v != "" {
+		values[settings.StAPISecret] = v
+	}
+	if v := q.Get("api-dashboard"); v != "" {
+		values[settings.StAPIDashboard] = v
 	}
 	return values, nil
 }

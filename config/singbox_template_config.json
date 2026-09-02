@@ -1,22 +1,23 @@
 {
-  "log": {
-    "disabled": false,
-    "level": "info",
-    "output": "box.log",
-    "timestamp": true
-  },
-  "experimental": {
-    "clash_api": {
-      "external_controller": "127.0.0.1:9090",
-      "external_ui": "./ui/",
-      "external_ui_download_detour": "节点选择",
-      "secret": "",
-      "default_mode": "rule"
-    },
-    "cache_file": {
-      "enabled": true
-    }
-  },
+  "log": { "disabled": false, "level": "info", "output": "box.log", "timestamp": true },
+  "experimental": { "cache_file": { "enabled": true } },
+  "http_clients": [
+      {
+          "tag": "internal-resources-out",
+          "detour": "节点选择"
+      }
+  ],
+  "services": [
+      {
+          "type": "api",
+          "listen": "127.0.0.1",
+          "listen_port": 9090,
+          "dashboard": {
+              "enabled": true,
+              "http_client": "internal-resources-out"
+          }
+      }
+  ],
   "dns": {
     "servers": [
       {
@@ -126,6 +127,7 @@
       { "rule_set": ["geosite-cn", "geoip-cn"], "outbound": "直连" },
       { "rule_set": "geosite-geolocation-!cn", "outbound": "节点选择" }
     ],
+    "default_http_client": "internal-resources-out",
     "default_domain_resolver": "dns-ali",
     "auto_detect_interface": true,
     "final": "漏网之鱼",
@@ -134,43 +136,37 @@
         "tag": "geosite-cn",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/cn.srs",
-        "download_detour": "节点选择"
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/cn.srs"
       },
       {
         "tag": "geosite-openai",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/openai.srs",
-        "download_detour": "节点选择"
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/openai.srs"
       },
       {
         "tag": "geosite-github",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/github.srs",
-        "download_detour": "节点选择"
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/github.srs"
       },
       {
         "tag": "geosite-microsoft",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/microsoft.srs",
-        "download_detour": "节点选择"
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/microsoft.srs"
       },
       {
         "tag": "geosite-geolocation-!cn",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/geolocation-!cn.srs",
-        "download_detour": "节点选择"
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/geolocation-!cn.srs"
       },
       {
         "tag": "geoip-cn",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geoip/cn.srs",
-        "download_detour": "节点选择"
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geoip/cn.srs"
       }
     ]
   }
