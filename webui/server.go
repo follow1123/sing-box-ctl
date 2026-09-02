@@ -116,8 +116,13 @@ func initWorkingDir(workingDir string) error {
 
 func (s *Server) Serve() error {
 	log.Printf("working directory: %s", s.workingDir)
+	// 先绑定端口，成功后再打印启动日志，避免 bind 失败时日志顺序误导
+	ln, err := net.Listen("tcp", s.server.Addr)
+	if err != nil {
+		return fmt.Errorf("listen %s error:\n\t%w", s.server.Addr, err)
+	}
 	log.Printf("webui started on %s", s.server.Addr)
-	if err := s.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := s.server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("start webui server error:\n\t%w", err)
 	}
 	return nil
