@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import PageShell from '../components/PageShell.vue'
+import ContentPage from '../components/ContentPage.vue'
 import { api } from '../composables/useApi'
 import type { ProviderConfig, TemplateInfo } from '../types'
 
@@ -10,7 +10,6 @@ const error = ref('')
 const notice = ref('')
 let noticeTimer: ReturnType<typeof setTimeout> | undefined
 
-/** 短暂的成功提示（2s 后自动消失），同时清除错误提示 */
 function flashNotice(msg: string): void {
   error.value = ''
   notice.value = msg
@@ -44,7 +43,6 @@ const tplDefaults = ref({
   mixed: { listen: '', port: '' },
   api: { listen: '', port: '', secret: '', dashboard: true },
 })
-const importUrlInput = ref('')
 
 const url = computed(() => buildUrl())
 
@@ -70,11 +68,25 @@ function buildUrl(): string {
   return location.origin + '/config/' + providerUuid.value + (params.length ? '?' + params.join('&') : '')
 }
 
+/** 顶部“导入”按钮：弹窗输入 URL，取消/空输入不做任何处理 */
+function promptImport(): void {
+  const raw = window.prompt('粘贴已有的配置 URL')
+  if (raw === null) return
+  const text = raw.trim()
+  if (!text) return
+  importFromUrl(text)
+}
+
+/** 从配置 URL 解析并回填页面状态 */
 function importFromUrl(raw: string): void {
   try {
     const u = new URL(raw, location.origin)
     const m = u.pathname.match(/\/config\/([^/]+)/)
-    if (m) providerUuid.value = m[1]
+    if (!m) {
+      error.value = 'URL 格式不正确，应包含 /config/<provider-uuid>'
+      return
+    }
+    providerUuid.value = m[1]
     const q = u.searchParams
     if (q.has('template')) templateUuid.value = q.get('template') || ''
     if (q.has('platform')) platform.value = q.get('platform') || 'windows'
@@ -89,6 +101,7 @@ function importFromUrl(raw: string): void {
     apiPort.value = q.get('api-port') || ''
     apiSecret.value = q.get('api-secret') || ''
     syncPlatformState()
+    notice.value = '已导入'
   } catch (e) {
     error.value = '导入失败: ' + (e as Error).message
   }
@@ -247,186 +260,141 @@ onMounted(async () => {
 </script>
 
 <template>
-  <PageShell>
-    <template #aside>
-      <h2>从 URL 导入</h2>
-      <input v-model="importUrlInput" type="text" placeholder="粘贴已有 URL" />
-      <button class="import-btn" @click="importFromUrl(importUrlInput)">导入</button>
+  <ContentPage>
+    <h1>生成配置 URL</h1>
 
-      <h2 class="group-title">选择</h2>
-      <div class="field">
-        <label>Provider</label>
+    <!-- 区域1：按钮功能区 -->
+    <div class="top-bar">
+      <button class="btn-import" @click="promptImport">导入</button>
+      <div class="top-actions">
+        <button id="copyBtn" @click="copyUrl">复制 URL</button>
+        <button id="openBtn" @click="openUrl">打开</button>
+      </div>
+    </div>
+
+    <!-- 区域2：URL 预览 + 提示 -->
+    <div class="card preview-card">
+      <div class="card-title">URL 预览</div>
+      <textarea
+        id="url-box"
+        readonly
+        rows="3"
+        :value="url || '请选择 Provider 以生成 URL'"
+      ></textarea>
+      <p v-if="error" class="error">{{ error }}</p>
+      <p v-else-if="notice" class="ok">{{ notice }}</p>
+    </div>
+
+    <!-- 区域3：选择元数据 -->
+    <h2 class="section-label">选择 Provider 与模板</h2>
+    <div class="select-grid">
+      <div class="card">
+        <div class="card-title">Provider</div>
         <select v-model="providerUuid">
           <option value="">-- 选择 provider --</option>
           <option v-for="p in providers" :key="p.uuid" :value="p.uuid">{{ p.name }}</option>
         </select>
       </div>
-      <div class="field">
-        <label>模板</label>
+      <div class="card">
+        <div class="card-title">模板</div>
         <select v-model="templateUuid" @change="applyTemplateDefaults">
           <option v-for="t in templates" :key="t.uuid" :value="t.uuid">
             {{ t.name }}{{ t.default ? '（默认）' : '' }}
           </option>
         </select>
       </div>
-    </template>
-
-    <h1>生成配置 URL</h1>
-
-    <div class="section">
-      <h2>Platform</h2>
-      <select v-model="platform" @change="onPlatformChange">
-        <option value="windows">Windows</option>
-        <option value="linux">Linux</option>
-        <option value="android">Android</option>
-      </select>
-      <p v-if="platform === 'android'" class="platform-hint">Android 必须使用 Tun 模式，Tun 开关已强制开启。</p>
     </div>
 
-    <div class="section">
-      <h2>Tun 模式</h2>
-      <label class="check-row"><input v-model="tun" type="checkbox" :disabled="tunDisabled" /> 启用 Tun</label>
-    </div>
-
-    <div class="section">
-      <h2>Mixed 模式</h2>
-      <label class="check-row"><input v-model="mixed" type="checkbox" @change="onMixedChange" /> 启用 Mixed</label>
-      <div v-if="mixed" class="sub-fields">
-        <div class="field">
-          <div class="field-title">监听地址</div>
-          <input v-model="mixedListen" type="text" placeholder="127.0.0.1" />
-        </div>
-        <div class="field">
-          <div class="field-title">端口</div>
-          <input v-model="mixedPort" type="number" placeholder="7899" />
-        </div>
-        <label class="check-row"><input v-model="sysProxy" type="checkbox" /> 系统代理</label>
+    <!-- 区域4：配置开关 -->
+    <h2 class="section-label">模式与功能开关</h2>
+    <div class="option-grid">
+      <div class="card">
+        <div class="card-title">Platform</div>
+        <select v-model="platform" @change="onPlatformChange">
+          <option value="windows">Windows</option>
+          <option value="linux">Linux</option>
+          <option value="android">Android</option>
+        </select>
+        <p v-if="platform === 'android'" class="platform-hint">Android 必须使用 Tun 模式，Tun 开关已强制开启。</p>
       </div>
-    </div>
 
-    <div class="section">
-      <h2>Sing-box API</h2>
-      <p class="section-desc">gRPC 服务（默认禁用），供 sing-box 官方客户端与 Dashboard 远程查看和控制本实例。</p>
-      <label class="check-row"><input v-model="apiEnabled" type="checkbox" @change="onApiChange" /> 启用 Sing-box API</label>
-      <div v-if="apiEnabled" class="sub-fields">
-        <label class="check-row"><input v-model="apiDashboard" type="checkbox" /> 启用 Dashboard（Web 面板）</label>
-        <div class="field">
-          <div class="field-title">监听地址</div>
-          <input v-model="apiListen" type="text" placeholder="127.0.0.1" />
-        </div>
-        <div class="field">
-          <div class="field-title">端口</div>
-          <input v-model="apiPort" type="number" placeholder="9090" />
-        </div>
-        <div class="field">
-          <div class="field-title">Secret（可选）</div>
-          <input v-model="apiSecret" type="text" placeholder="留空则不设置" />
+      <div class="card">
+        <div class="card-title">Tun 模式</div>
+        <label class="check-row"><input v-model="tun" type="checkbox" :disabled="tunDisabled" /> 启用 Tun</label>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Mixed 模式</div>
+        <label class="check-row"><input v-model="mixed" type="checkbox" @change="onMixedChange" /> 启用 Mixed</label>
+        <div v-if="mixed" class="sub-fields">
+          <div class="field">
+            <div class="field-title">监听地址</div>
+            <input v-model="mixedListen" type="text" placeholder="127.0.0.1" />
+          </div>
+          <div class="field">
+            <div class="field-title">端口</div>
+            <input v-model="mixedPort" type="number" placeholder="7899" />
+          </div>
+          <label class="check-row"><input v-model="sysProxy" type="checkbox" /> 系统代理</label>
         </div>
       </div>
-    </div>
 
-    <button id="copyBtn" @click="copyUrl">复制 URL</button>
-    <button id="openBtn" @click="openUrl">打开</button>
-    <p v-if="error" class="error">{{ error }}</p>
-    <p v-if="notice" class="ok">{{ notice }}</p>
-    <input id="url-box" type="text" readonly :value="url || '请选择 provider'" />
-  </PageShell>
+      <div class="card">
+        <div class="card-title">Sing-box API</div>
+        <p class="card-sub">gRPC 服务（默认禁用），供 sing-box 官方客户端与 Dashboard 远程查看和控制本实例。</p>
+        <label class="check-row"><input v-model="apiEnabled" type="checkbox" @change="onApiChange" /> 启用 Sing-box API</label>
+        <div v-if="apiEnabled" class="sub-fields">
+          <label class="check-row"><input v-model="apiDashboard" type="checkbox" /> 启用 Dashboard（Web 面板）</label>
+          <div class="field">
+            <div class="field-title">监听地址</div>
+            <input v-model="apiListen" type="text" placeholder="127.0.0.1" />
+          </div>
+          <div class="field">
+            <div class="field-title">端口</div>
+            <input v-model="apiPort" type="number" placeholder="9090" />
+          </div>
+          <div class="field">
+            <div class="field-title">Secret（可选）</div>
+            <input v-model="apiSecret" type="text" placeholder="留空则不设置" />
+          </div>
+        </div>
+      </div>
+    </div>
+  </ContentPage>
 </template>
 
 <style scoped>
 h1 {
   font-size: 1.2rem;
-  margin-bottom: 1rem;
+  margin: 0 0 1rem;
   color: var(--text-1);
 }
-.field {
+.top-bar {
   display: flex;
-  flex-direction: column;
-  margin-bottom: 0.8rem;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
 }
-label {
-  font-size: 0.85rem;
-  margin-bottom: 4px;
-  color: var(--text-2);
-}
-.group-title {
-  margin-top: 1rem;
-}
-input[type='text'],
-input[type='number'],
-select {
-  padding: 0.45rem;
-  border: 1px solid var(--surface-3);
-  border-radius: var(--radius-2);
-  font-size: 0.9rem;
-  background: var(--surface-2);
-  color: var(--text-1);
-}
-.import-btn {
-  margin-top: 6px;
+.top-actions {
+  display: flex;
+  gap: 0.6rem;
 }
 button {
-  padding: 0.5rem 0.9rem;
-  font-size: 0.9rem;
+  padding: 0.5rem 1rem;
   border: none;
   border-radius: var(--radius-2);
+  background: var(--surface-3);
+  color: var(--text-1);
   cursor: pointer;
-  margin: 4px 8px 4px 0;
+  font-size: 0.9rem;
   transition: filter var(--ease-3) 0.15s;
 }
 button:hover {
   filter: brightness(0.92);
 }
-.section {
-  background: var(--surface-2);
-  border: 1px solid var(--surface-3);
-  border-radius: var(--radius-2);
-  padding: 1rem;
-  margin-bottom: 1rem;
-  box-shadow: var(--shadow-2);
-}
-.section h2 {
-  font-size: 0.9rem;
-  margin-bottom: 0.8rem;
-  color: var(--text-2);
-}
-.section-desc {
-  font-size: 0.8rem;
-  color: var(--text-2);
-  margin: -0.4rem 0 0.6rem;
-}
-.platform-hint {
-  font-size: 0.8rem;
-  color: var(--orange-9);
-  margin-top: 0.7rem;
-  margin-bottom: 0;
-}
-.field-title {
-  font-weight: var(--font-weight-6);
-  margin-bottom: 6px;
-  font-size: 0.9rem;
-  color: var(--text-1);
-}
-.check-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 0;
-  color: var(--text-1);
-  cursor: pointer;
-}
-.check-row input[type='checkbox'] {
-  width: 17px;
-  height: 17px;
-  accent-color: var(--brand);
-}
-.sub-fields {
-  border-left: 3px solid var(--surface-3);
-  padding-left: 12px;
-  margin-top: 4px;
-}
-.sub-fields .field {
-  margin-bottom: 0.6rem;
+.btn-import {
+  background: var(--surface-3);
 }
 #copyBtn {
   background: var(--green-7);
@@ -436,26 +404,118 @@ button:hover {
   background: var(--brand);
   color: #fff;
 }
+.card {
+  background: var(--surface-2);
+  border: 1px solid var(--surface-3);
+  border-radius: var(--radius-2);
+  padding: 1rem;
+}
+.card-title {
+  font-weight: var(--font-weight-6);
+  font-size: 0.95rem;
+  color: var(--text-1);
+  margin-bottom: 0.6rem;
+}
+/* 分区小标题：文字 + 右侧延伸分隔线 */
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 1rem;
+  font-weight: var(--font-weight-7);
+  color: var(--text-1);
+  margin: 1.8rem 0 1rem;
+}
+.section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--surface-3);
+}
+.card-sub {
+  font-size: 0.8rem;
+  color: var(--text-2);
+  margin: -0.2rem 0 0.6rem;
+}
+.preview-card {
+  margin-bottom: 1rem;
+}
 #url-box {
   width: 100%;
-  margin-top: 10px;
+  box-sizing: border-box;
   padding: 0.6rem;
   border: 1px solid var(--surface-3);
   border-radius: var(--radius-2);
   font-family: var(--font-monospace-code);
   font-size: 0.85rem;
-  background: var(--surface-2);
+  background: var(--surface-1);
   color: var(--text-1);
+  resize: vertical;
   word-break: break-all;
+  white-space: pre-wrap;
+}
+.select-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.option-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+select,
+input {
+  padding: 0.45rem;
+  border: 1px solid var(--surface-3);
+  border-radius: var(--radius-2);
+  font-size: 0.9rem;
+  background: var(--surface-1);
+  color: var(--text-1);
+  width: 100%;
+  box-sizing: border-box;
+}
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  color: var(--text-1);
+  cursor: pointer;
+}
+.check-row input[type='checkbox'] {
+  width: auto;
+}
+.sub-fields {
+  border-left: 3px solid var(--surface-4);
+  padding-left: 12px;
+  margin-top: 6px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0.6rem;
+}
+.field-title {
+  font-weight: var(--font-weight-5);
+  margin-bottom: 4px;
+  font-size: 0.85rem;
+  color: var(--text-2);
+}
+.platform-hint {
+  font-size: 0.8rem;
+  color: var(--orange-9);
+  margin: 0.7rem 0 0;
 }
 .error {
   color: var(--red-7);
-  margin-top: 6px;
+  margin: 0.6rem 0 0;
   font-size: 0.9rem;
+  white-space: pre-wrap;
 }
 .ok {
   color: var(--green-7);
-  margin-top: 6px;
+  margin: 0.6rem 0 0;
   font-size: 0.9rem;
 }
 </style>
