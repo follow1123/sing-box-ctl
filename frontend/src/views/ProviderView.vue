@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import PageShell from '../components/PageShell.vue'
+import { ref, watch, onMounted } from 'vue'
+import ContentPage from '../components/ContentPage.vue'
+import Modal from '../components/Modal.vue'
 import { api } from '../composables/useApi'
 import type { ProviderConfig, ProviderRequest } from '../types'
 
@@ -8,7 +9,8 @@ const providers = ref<ProviderConfig[]>([])
 const error = ref('')
 const notice = ref('')
 
-// 表单状态
+// 表单弹框状态
+const showForm = ref(false)
 const formTitle = ref('添加 Provider')
 const submitLabel = ref('添加')
 const editingUuid = ref<string | null>(null)
@@ -24,21 +26,42 @@ async function load(): Promise<void> {
   }
 }
 
-function resetForm(): void {
+function openCreate(): void {
+  error.value = ''
   editingUuid.value = null
   form.value = { name: '', url: '', source: 'url', message: '' }
   fileInput.value = null
   formTitle.value = '添加 Provider'
   submitLabel.value = '添加'
+  showForm.value = true
 }
 
-function fillForm(p: ProviderConfig): void {
+function openEdit(p: ProviderConfig): void {
+  error.value = ''
   editingUuid.value = p.uuid
   form.value = { name: p.name, url: p.url || '', source: p.source, message: p.message || '' }
   fileInput.value = null
   formTitle.value = '编辑 Provider'
   submitLabel.value = '保存修改'
+  showForm.value = true
 }
+
+function closeForm(): void {
+  showForm.value = false
+}
+
+function onFileChange(e: Event): void {
+  const el = e.target as HTMLInputElement
+  fileInput.value = el.files?.[0] ?? null
+}
+
+// 切换为 url 来源时清掉已选文件，避免提交时误传
+watch(
+  () => form.value.source,
+  (src) => {
+    if (src === 'url') fileInput.value = null
+  },
+)
 
 async function uploadFile(uuid: string): Promise<void> {
   if (!fileInput.value) return
@@ -50,6 +73,10 @@ async function uploadFile(uuid: string): Promise<void> {
 async function submit(): Promise<void> {
   if (form.value.source === 'url' && !/^https?:\/\//i.test(form.value.url)) {
     error.value = 'URL 必须是 http(s) 地址'
+    return
+  }
+  if (form.value.source === 'upload' && !fileInput.value) {
+    error.value = '请选择要上传的配置文件'
     return
   }
   try {
@@ -69,7 +96,7 @@ async function submit(): Promise<void> {
       await uploadFile(created.uuid)
     }
     notice.value = editingUuid.value ? '已保存' : '已添加'
-    resetForm()
+    closeForm()
     await load()
   } catch (e) {
     error.value = '保存失败: ' + (e as Error).message
@@ -119,40 +146,15 @@ onMounted(load)
 </script>
 
 <template>
-  <PageShell>
-    <template #aside>
-      <h2>{{ formTitle }}</h2>
-      <form @submit.prevent="submit">
-        <div class="field">
-          <label>名称</label>
-          <input v-model="form.name" placeholder="机场名称" required />
-        </div>
-        <div class="field">
-          <label>来源</label>
-          <select v-model="form.source">
-            <option value="url">url</option>
-            <option value="upload">upload</option>
-          </select>
-        </div>
-        <div v-if="form.source === 'url'" class="field">
-          <label>订阅 URL（http/https）</label>
-          <input v-model="form.url" placeholder="https://..." />
-        </div>
-        <div v-else class="field">
-          <label>上传配置文件</label>
-          <input type="file" @change="fileInput = ($event.target as HTMLInputElement).files?.[0] ?? null" />
-        </div>
-        <div class="field">
-          <label>备注</label>
-          <input v-model="form.message" placeholder="可选" />
-        </div>
-        <button type="submit">{{ submitLabel }}</button>
-      </form>
-    </template>
+  <ContentPage>
+    <div class="page-header">
+      <h1>Provider 管理</h1>
+      <button class="btn-add" @click="openCreate">+ 添加</button>
+    </div>
 
-    <h1>Provider 管理</h1>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="notice" class="ok">{{ notice }}</p>
+
     <table>
       <thead>
         <tr>
@@ -172,7 +174,7 @@ onMounted(load)
           <td class="src">{{ p.source }}</td>
           <td class="msg" :title="p.message || ''">{{ p.message || '' }}</td>
           <td class="actions">
-            <button @click="fillForm(p)">编辑</button>
+            <button @click="openEdit(p)">编辑</button>
             <button class="btn-fetch" @click="p.source === 'upload' ? uploadSub(p) : fetchSub(p)">
               {{ p.source === 'upload' ? '上传' : '更新' }}
             </button>
@@ -181,13 +183,52 @@ onMounted(load)
         </tr>
       </tbody>
     </table>
-  </PageShell>
+
+    <Modal v-if="showForm" :title="formTitle" @close="closeForm">
+      <form @submit.prevent="submit">
+        <p v-if="error" class="error">{{ error }}</p>
+        <div class="field">
+          <label>名称</label>
+          <input v-model="form.name" placeholder="机场名称" required />
+        </div>
+        <div class="field">
+          <label>来源</label>
+          <select v-model="form.source">
+            <option value="url">url</option>
+            <option value="upload">upload</option>
+          </select>
+        </div>
+        <div v-if="form.source === 'url'" class="field">
+          <label>订阅 URL（http/https）</label>
+          <input v-model="form.url" placeholder="https://..." />
+        </div>
+        <div v-else class="field">
+          <label>上传配置文件</label>
+          <input type="file" @change="onFileChange" />
+        </div>
+        <div class="field">
+          <label>备注</label>
+          <input v-model="form.message" placeholder="可选" />
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn-save">{{ submitLabel }}</button>
+          <button type="button" class="btn-cancel" @click="closeForm">取消</button>
+        </div>
+      </form>
+    </Modal>
+  </ContentPage>
 </template>
 
 <style scoped>
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
 h1 {
   font-size: 1.2rem;
-  margin-bottom: 1rem;
+  margin: 0;
   color: var(--text-1);
 }
 .field {
@@ -222,11 +263,33 @@ button {
 button:hover {
   filter: brightness(0.92);
 }
+.form-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.form-actions .btn-save {
+  background: var(--green-7);
+}
+.form-actions .btn-cancel {
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+.btn-add {
+  background: var(--brand);
+  color: #fff;
+}
 table {
-  border-collapse: collapse;
   width: 100%;
   table-layout: fixed;
+  /* separate + overflow hidden：让外层边框/背景圆角生效并裁掉内部直角，
+     collapse 模式下圆角无法干净渲染（这正是此前尖角/底部圆角问题的根源） */
+  border-collapse: separate;
+  border-spacing: 0;
   background: var(--surface-2);
+  border: 1px solid var(--surface-3);
+  border-radius: var(--radius-2);
+  overflow: hidden;
 }
 th,
 td {
@@ -239,20 +302,18 @@ th {
   background: var(--surface-3);
   color: var(--text-1);
 }
-th:first-child {
-  border-top-left-radius: var(--radius-2);
-}
-th:last-child {
-  border-top-right-radius: var(--radius-2);
-}
 tr:last-child td {
   border-bottom: none;
 }
-tr:last-child td:first-child {
-  border-bottom-left-radius: var(--radius-2);
+/* normalize 会给表头首/末列与末行首/末列单独加更大的内缩圆角（--nice-inner-radius），
+   与外层 table 的小圆角不协调；这里清零，四角统一由 table 外层圆角控制 */
+table thead tr:first-child th {
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
 }
-tr:last-child td:last-child {
-  border-bottom-right-radius: var(--radius-2);
+table tbody tr:last-child td {
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
 }
 .msg {
   color: var(--text-2);
@@ -276,17 +337,6 @@ tr:last-child td:last-child {
   width: 150px;
   white-space: nowrap;
 }
-.error {
-  color: var(--red-7);
-  margin: 0.5rem 0;
-  white-space: pre-wrap;
-  font-size: 0.9rem;
-}
-.ok {
-  color: var(--green-7);
-  margin: 0.5rem 0;
-  font-size: 0.9rem;
-}
 .actions button {
   margin-right: 0.3rem;
   padding: 0.3rem 0.7rem;
@@ -297,5 +347,16 @@ tr:last-child td:last-child {
 }
 .actions .btn-del {
   background: var(--red-7);
+}
+.error {
+  color: var(--red-7);
+  margin: 0.5rem 0;
+  white-space: pre-wrap;
+  font-size: 0.9rem;
+}
+.ok {
+  color: var(--green-7);
+  margin: 0.5rem 0;
+  font-size: 0.9rem;
 }
 </style>
