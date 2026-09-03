@@ -117,3 +117,16 @@ pnpm dev            # http://localhost:5173
 cd frontend
 pnpm build          # pnpm build:web && pnpm build:go（构建 webui/dist 并编译 ../sbctl）
 ```
+
+## 待办与已知问题
+
+> 使用中收集的问题与迭代规划，按主题记录，后续统一处理。
+
+1. **模板管理**：
+   - 增加更明显的“默认模板”标识，进入页面即可见当前默认；
+   - 新建模板改为弹窗选择复制来源（内置默认模板 / 现有其它模板），不再直接创建内置副本，与 URL 页模板下拉的交互保持一致。
+2. **HTTPS 与本地服务配置**：为 Web 服务支持证书配置以启用 https（避免配置链接在传输中被窃听）；考虑恢复 `working_dir/config.json` 集中存放此类服务配置（证书、密钥等），默认直接读取该文件，不增加命令行选项。
+3. **前端视觉样式美化**（最后处理）。
+4. **前端移动端适配**（最后处理）。
+5. **配置历史回滚**：providers/templates 已滚动保存 current/last/old 三份，但页面无查看/回滚历史版本的入口（早期 CLI 的 restore 已移除），可考虑加回 UI。
+6. **订阅下载可控性**：Provider URL 下载为直接 GET，可增加超时、自定义 User-Agent / 请求头等选项。

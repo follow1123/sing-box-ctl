@@ -165,10 +165,12 @@ onMounted(load)
       </thead>
       <tbody>
         <tr v-for="p in providers" :key="p.uuid">
-          <td>{{ p.name }}</td>
-          <td class="msg">{{ p.source === 'upload' ? p.file_name || '' : p.url }}</td>
-          <td>{{ p.source }}</td>
-          <td class="msg">{{ p.message || '' }}</td>
+          <td class="name">{{ p.name }}</td>
+          <td class="msg ellipsis" :title="p.source === 'upload' ? (p.file_name || '') : p.url">
+            {{ p.source === 'upload' ? p.file_name || '' : p.url }}
+          </td>
+          <td class="src">{{ p.source }}</td>
+          <td class="msg" :title="p.message || ''">{{ p.message || '' }}</td>
           <td class="actions">
             <button @click="fillForm(p)">编辑</button>
             <button class="btn-fetch" @click="p.source === 'upload' ? uploadSub(p) : fetchSub(p)">
@@ -223,6 +225,7 @@ button:hover {
 table {
   border-collapse: collapse;
   width: 100%;
+  table-layout: fixed;
   background: var(--surface-2);
 }
 th,
@@ -254,7 +257,24 @@ tr:last-child td:last-child {
 .msg {
   color: var(--text-2);
   font-size: 0.82rem;
-  word-break: break-all;
+}
+/* 长 URL/备注单行省略，悬停显示完整内容 */
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.src {
+  width: 76px;
+}
+.actions {
+  width: 150px;
+  white-space: nowrap;
 }
 .error {
   color: var(--red-7);

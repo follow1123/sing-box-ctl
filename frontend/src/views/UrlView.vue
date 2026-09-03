@@ -7,6 +7,16 @@ import type { ProviderConfig, TemplateInfo } from '../types'
 const providers = ref<ProviderConfig[]>([])
 const templates = ref<TemplateInfo[]>([])
 const error = ref('')
+const notice = ref('')
+let noticeTimer: ReturnType<typeof setTimeout> | undefined
+
+/** 短暂的成功提示（2s 后自动消失），同时清除错误提示 */
+function flashNotice(msg: string): void {
+  error.value = ''
+  notice.value = msg
+  if (noticeTimer) clearTimeout(noticeTimer)
+  noticeTimer = setTimeout(() => (notice.value = ''), 2000)
+}
 
 const providerUuid = ref('')
 const templateUuid = ref('')
@@ -188,15 +198,17 @@ async function copyUrl(): Promise<void> {
   }
   try {
     await navigator.clipboard.writeText(url.value)
-    error.value = ''
+    flashNotice('已复制到剪贴板')
   } catch {
     // 旧浏览器降级
     const ta = document.createElement('textarea')
     ta.value = url.value
     document.body.appendChild(ta)
     ta.select()
-    document.execCommand('copy')
+    const ok = document.execCommand('copy')
     document.body.removeChild(ta)
+    if (ok) flashNotice('已复制到剪贴板')
+    else error.value = '复制失败，请手动选择复制'
   }
 }
 
@@ -268,7 +280,7 @@ onMounted(async () => {
         <option value="linux">Linux</option>
         <option value="android">Android</option>
       </select>
-      <p v-if="platform === 'android'" class="section-desc">Android 必须使用 Tun 模式，Tun 开关已强制开启。</p>
+      <p v-if="platform === 'android'" class="platform-hint">Android 必须使用 Tun 模式，Tun 开关已强制开启。</p>
     </div>
 
     <div class="section">
@@ -316,6 +328,7 @@ onMounted(async () => {
     <button id="copyBtn" @click="copyUrl">复制 URL</button>
     <button id="openBtn" @click="openUrl">打开</button>
     <p v-if="error" class="error">{{ error }}</p>
+    <p v-if="notice" class="ok">{{ notice }}</p>
     <input id="url-box" type="text" readonly :value="url || '请选择 provider'" />
   </PageShell>
 </template>
@@ -382,6 +395,12 @@ button:hover {
   color: var(--text-2);
   margin: -0.4rem 0 0.6rem;
 }
+.platform-hint {
+  font-size: 0.8rem;
+  color: var(--orange-9);
+  margin-top: 0.7rem;
+  margin-bottom: 0;
+}
 .field-title {
   font-weight: var(--font-weight-6);
   margin-bottom: 6px;
@@ -431,6 +450,11 @@ button:hover {
 }
 .error {
   color: var(--red-7);
+  margin-top: 6px;
+  font-size: 0.9rem;
+}
+.ok {
+  color: var(--green-7);
   margin-top: 6px;
   font-size: 0.9rem;
 }
