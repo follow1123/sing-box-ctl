@@ -1,0 +1,112 @@
+package cmd
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestLoadServerFileConfig(t *testing.T) {
+	t.Run("missing file returns empty config", func(t *testing.T) {
+		cfg, err := loadServerFileConfig(t.TempDir())
+		require.NoError(t, err)
+		require.Equal(t, &serverFileConfig{}, cfg)
+	})
+
+	t.Run("parse config file", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, "config.json"),
+			[]byte(`{"listen":"0.0.0.0","port":9000,"certificate_file":"certs/a.crt","certificate_key_file":"certs/a.key"}`),
+			0600,
+		))
+		cfg, err := loadServerFileConfig(dir)
+		require.NoError(t, err)
+		require.Equal(t, "0.0.0.0", cfg.Listen)
+		require.Equal(t, 9000, cfg.Port)
+		require.Equal(t, "certs/a.crt", cfg.CertificateFile)
+		require.Equal(t, "certs/a.key", cfg.CertificateKeyFile)
+	})
+
+	t.Run("invalid json", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{bad`), 0600))
+		_, err := loadServerFileConfig(dir)
+		require.Error(t, err)
+	})
+}
+
+func TestMergeServerConfig(t *testing.T) {
+	file := &serverFileConfig{Listen: "0.0.0.0", Port: 9000, CertificateFile: "certs/a.crt", CertificateKeyFile: "certs/a.key"}
+
+	t.Run("file values used when no cli flags", func(t *testing.T) {
+		cfg := mergeServerConfig("", 0, file, "/wd")
+		require.Equal(t, "0.0.0.0", cfg.listen)
+		require.Equal(t, 9000, cfg.port)
+		require.Equal(t, "/wd/certs/a.crt", cfg.certFile)
+		require.Equal(t, "/wd/certs/a.key", cfg.keyFile)
+	})
+
+	t.Run("cli flags override file", func(t *testing.T) {
+		cfg := mergeServerConfig("127.0.0.1", 9112, file, "/wd")
+		require.Equal(t, "127.0.0.1", cfg.listen)
+		require.Equal(t, 9112, cfg.port)
+	})
+
+	t.Run("defaults when everything empty", func(t *testing.T) {
+		cfg := mergeServerConfig("", 0, &serverFileConfig{}, "/wd")
+		require.Equal(t, defaultListen, cfg.listen)
+		require.Equal(t, defaultPort, cfg.port)
+		require.Empty(t, cfg.certFile)
+	})
+}
+
+func TestResolvePath(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		require.Equal(t, "", resolvePath("/wd", ""))
+	})
+	t.Run("relative resolved against working dir", func(t *testing.T) {
+		require.Equal(t, filepath.Join("/wd", "certs/a.crt"), resolvePath("/wd", "certs/a.crt"))
+	})
+	t.Run("absolute kept", func(t *testing.T) {
+		require.Equal(t, "/abs/a.crt", resolvePath("/wd", "/abs/a.crt"))
+	})
+	t.Run("env expansion", func(t *testing.T) {
+		t.Setenv("SBCTL_TEST_DIR", "/envdir")
+		require.Equal(t, filepath.Join("/envdir", "a.key"), resolvePath("/wd", "$SBCTL_TEST_DIR/a.key"))
+	})
+}
+
+func TestMergedConfigValidate(t *testing.T) {
+	t.Run("cert and key must be paired", func(t *testing.T) {
+		cfg := mergedConfig{listen: "127.0.0.1", port: 8080, certFile: "/x.crt"}
+		require.Error(t, cfg.validate())
+	})
+
+	t.Run("no certs is valid", func(t *testing.T) {
+		cfg := mergedConfig{listen: "127.0.0.1", port: 8080}
+		require.NoError(t, cfg.validate())
+	})
+
+	t.Run("missing file errors", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg := mergedConfig{
+			listen: "127.0.0.1", port: 8080,
+			certFile: filepath.Join(dir, "nope.crt"),
+			keyFile:  filepath.Join(dir, "nope.key"),
+		}
+		require.Error(t, cfg.validate())
+	})
+
+	t.Run("both files exist is valid", func(t *testing.T) {
+		dir := t.TempDir()
+		crt := filepath.Join(dir, "a.crt")
+		key := filepath.Join(dir, "a.key")
+		require.NoError(t, os.WriteFile(crt, []byte("c"), 0600))
+		require.NoError(t, os.WriteFile(key, []byte("k"), 0600))
+		cfg := mergedConfig{listen: "127.0.0.1", port: 8080, certFile: crt, keyFile: key}
+		require.NoError(t, cfg.validate())
+	})
+}

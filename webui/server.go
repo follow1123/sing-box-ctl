@@ -37,14 +37,23 @@ const (
 
 type Server struct {
 	workingDir string
-	host       string
-	port       int
+	certFile   string
+	keyFile    string
 	server     *http.Server
 }
 
-func New(workingDir, host string, port int) (*Server, error) {
+// Options 服务启动配置（由 cmd 层从命令行与 working_dir/config.json 合并而来）
+type Options struct {
+	WorkingDir string
+	Listen     string
+	Port       int
+	CertFile   string
+	KeyFile    string
+}
+
+func New(opts Options) (*Server, error) {
 	// 先解析为绝对路径，便于后续日志与每次请求重建 provider 时保持一致
-	p, err := provider.New(workingDir)
+	p, err := provider.New(opts.WorkingDir)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +61,7 @@ func New(workingDir, host string, port int) (*Server, error) {
 	if err := initWorkingDir(absDir); err != nil {
 		return nil, err
 	}
-	s := &Server{workingDir: absDir, host: host, port: port}
+	s := &Server{workingDir: absDir, certFile: opts.CertFile, keyFile: opts.KeyFile}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(apiPath, s.providersHandle)
@@ -70,7 +79,7 @@ func New(workingDir, host string, port int) (*Server, error) {
 	mux.HandleFunc("/", s.spaHandle)
 
 	s.server = &http.Server{
-		Addr:    net.JoinHostPort(host, strconv.Itoa(port)),
+		Addr:    net.JoinHostPort(opts.Listen, strconv.Itoa(opts.Port)),
 		Handler: recoverMiddleware(mux),
 	}
 	return s, nil
@@ -121,9 +130,21 @@ func (s *Server) Serve() error {
 	if err != nil {
 		return fmt.Errorf("listen %s error:\n\t%w", s.server.Addr, err)
 	}
-	log.Printf("webui started on %s", s.server.Addr)
-	if err := s.server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("start webui server error:\n\t%w", err)
+	scheme := "http"
+	if s.certFile != "" {
+		// 配置了证书则启用 https（证书文件已在启动前校验过）
+		scheme = "https"
+		log.Printf("tls certificate: %s", s.certFile)
+	}
+	log.Printf("webui started on %s://%s", scheme, s.server.Addr)
+	var serveErr error
+	if s.certFile != "" {
+		serveErr = s.server.ServeTLS(ln, s.certFile, s.keyFile)
+	} else {
+		serveErr = s.server.Serve(ln)
+	}
+	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+		return fmt.Errorf("start webui server error:\n\t%w", serveErr)
 	}
 	return nil
 }
