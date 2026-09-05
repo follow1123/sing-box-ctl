@@ -41,7 +41,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   overflow-y: auto;
   background: var(--surface-2);
   border: 1px solid var(--surface-4);
-  border-radius: var(--radius-3);
+  border-radius: var(--radius-2);
   box-shadow: var(--shadow-4);
   padding: 1rem 1.2rem;
 }

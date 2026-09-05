@@ -33,6 +33,8 @@ const (
 	apiPath          = "/api/providers"
 	apiTemplatesPath = "/api/templates"
 	configPathURL    = "/config/"
+	// BuiltinTemplateKey 内嵌种子模板的特殊 key（不落盘，仅作为新建模板的来源）
+	BuiltinTemplateKey = "builtin"
 )
 
 type Server struct {
@@ -97,30 +99,7 @@ func initWorkingDir(workingDir string) error {
 	if err := os.MkdirAll(p.TemplatesDir(), 0700); err != nil {
 		return fmt.Errorf("init templates dir error:\n\t%w", err)
 	}
-	// 模板目录为空时初始化默认模板；有模板但无 default 标记时补第一个为默认
-	infos, err := p.ListTemplates()
-	if err != nil {
-		return fmt.Errorf("list templates error:\n\t%w", err)
-	}
-	if len(infos) == 0 {
-		uuid, err := p.AddTemplate("默认模板")
-		if err != nil {
-			return fmt.Errorf("init default template error:\n\t%w", err)
-		}
-		if err := p.SaveTemplate(uuid, templateSeedData); err != nil {
-			return fmt.Errorf("init default template content error:\n\t%w", err)
-		}
-		if err := p.SetDefaultTemplate(uuid); err != nil {
-			return fmt.Errorf("init default template mark error:\n\t%w", err)
-		}
-		return nil
-	}
-	for _, info := range infos {
-		if info.Default {
-			return nil
-		}
-	}
-	return p.SetDefaultTemplate(infos[0].Uuid)
+	return nil
 }
 
 func (s *Server) Serve() error {
@@ -348,7 +327,7 @@ func isValidTemplateUuid(uuid string) bool {
 }
 
 // GET /api/templates -> 模板列表 [{uuid,name,default}]
-// POST /api/templates?name=xxx -> 新建模板（初始化为内置默认内容）
+// POST /api/templates?name=xxx&from=builtin|<uuid> -> 新建模板（复制来源内容）
 func (s *Server) templatesHandle(w http.ResponseWriter, r *http.Request) {
 	p, err := s.newProvider()
 	if err != nil {
@@ -370,13 +349,18 @@ func (s *Server) templatesHandle(w http.ResponseWriter, r *http.Request) {
 			handleError(w, fmt.Errorf("name is required"), http.StatusBadRequest)
 			return
 		}
+		source, err := resolveTemplateSource(p, r.URL.Query().Get("from"))
+		if err != nil {
+			handleError(w, err, http.StatusBadRequest)
+			return
+		}
 		uuid, err := p.AddTemplate(name)
 		if err != nil {
 			handleError(w, err, http.StatusBadRequest)
 			return
 		}
-		// 初始化为内置默认模板内容
-		if err := p.SaveTemplate(uuid, templateSeedData); err != nil {
+		// 内容来自来源（内置种子或已有用户模板）
+		if err := p.SaveTemplate(uuid, source); err != nil {
 			handleInternalServerError(w, err)
 			return
 		}
@@ -385,6 +369,22 @@ func (s *Server) templatesHandle(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+// resolveTemplateSource 解析新建模板的来源内容：缺省或 from=builtin 使用内嵌种子模板；
+// from=<uuid> 复制已有用户模板内容
+func resolveTemplateSource(p *provider.Provider, from string) ([]byte, error) {
+	if from == "" || from == BuiltinTemplateKey {
+		return templateSeedData, nil
+	}
+	if !isValidTemplateUuid(from) || !p.TemplateExists(from) {
+		return nil, fmt.Errorf("template source not found: %s", from)
+	}
+	data, err := p.ReadTemplate(from)
+	if err != nil {
+		return nil, fmt.Errorf("read template source error:\n\t%w", err)
+	}
+	return data, nil
 }
 
 // GET /api/templates/<uuid> -> 模板内容
@@ -492,7 +492,7 @@ func (s *Server) configHandle(w http.ResponseWriter, r *http.Request) {
 	if template == "" {
 		template, err = p.DefaultTemplate()
 		if err != nil {
-			handleInternalServerError(w, err)
+			handleError(w, fmt.Errorf("no template available, create one first"), http.StatusNotFound)
 			return
 		}
 	}

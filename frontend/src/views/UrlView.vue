@@ -201,6 +201,10 @@ async function copyUrl(): Promise<void> {
     error.value = '请先选择 provider'
     return
   }
+  if (templates.value.length === 0) {
+    error.value = '暂无模板，请先在模板管理页新建模板'
+    return
+  }
   if (!tun.value && !mixed.value && !hasOtherInbound.value) {
     error.value = '需要至少启用 Tun 或 Mixed 一种模式'
     return
@@ -228,6 +232,10 @@ async function copyUrl(): Promise<void> {
 function openUrl(): void {
   if (!providerUuid.value) {
     error.value = '请先选择 provider'
+    return
+  }
+  if (templates.value.length === 0) {
+    error.value = '暂无模板，请先在模板管理页新建模板'
     return
   }
   if (!tun.value && !mixed.value && !hasOtherInbound.value) {
@@ -298,6 +306,7 @@ onMounted(async () => {
       <div class="card">
         <div class="card-title">模板</div>
         <select v-model="templateUuid" @change="applyTemplateDefaults">
+          <option v-if="templates.length === 0" value="" disabled>暂无模板，请先在模板页新建</option>
           <option v-for="t in templates" :key="t.uuid" :value="t.uuid">
             {{ t.name }}{{ t.default ? '（默认）' : '' }}
           </option>

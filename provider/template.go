@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -14,6 +15,8 @@ type TemplateInfo struct {
 	Uuid    string `json:"uuid"`
 	Name    string `json:"name"`
 	Default bool   `json:"default"`
+	// modTime 目录创建（近似）时间，仅用于排序，不参与 JSON 输出
+	modTime time.Time
 }
 
 // TemplatesDir 返回模板目录
@@ -25,6 +28,9 @@ func (p *Provider) TemplatesDir() string {
 func (p *Provider) AddTemplate(name string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("name is required")
+	}
+	if p.templateNameExists(name) {
+		return "", fmt.Errorf("duplicate template name '%s'", name)
 	}
 	uuid := uuid.NewString()
 	dir := p.TemplateDir(uuid)
@@ -64,20 +70,46 @@ func (p *Provider) ListTemplates() ([]TemplateInfo, error) {
 		if err != nil {
 			name = uuid // name 文件缺失时用 uuid 兜底
 		}
+		// 排序时间取模板本体 name 文件（创建时写入一次、之后不变）的 mtime
+		modTime := time.Time{}
+		if info, err := os.Stat(filepath.Join(p.TemplateDir(uuid), "name")); err == nil {
+			modTime = info.ModTime()
+		}
 		infos = append(infos, TemplateInfo{
 			Uuid:    uuid,
 			Name:    name,
 			Default: p.IsDefaultTemplate(uuid),
+			modTime: modTime,
 		})
 	}
 	sort.Slice(infos, func(i, j int) bool {
-		// 默认模板排最前，其余按名称排序
+		// 默认模板排最前（固定在最左），其余按创建时间倒序（最新创建的在前）
 		if infos[i].Default != infos[j].Default {
 			return infos[i].Default
 		}
-		return infos[i].Name < infos[j].Name
+		if !infos[i].modTime.Equal(infos[j].modTime) {
+			return infos[i].modTime.After(infos[j].modTime)
+		}
+		return infos[i].Uuid < infos[j].Uuid
 	})
 	return infos, nil
+}
+
+// templateNameExists 判断是否存在同名模板
+func (p *Provider) templateNameExists(name string) bool {
+	entries, err := os.ReadDir(p.TemplatesDir())
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if content, ok := readFileContent(filepath.Join(p.TemplateDir(e.Name()), "name")); ok && content == name {
+			return true
+		}
+	}
+	return false
 }
 
 // TemplateExists 判断模板是否存在

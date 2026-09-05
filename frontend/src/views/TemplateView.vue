@@ -1,16 +1,29 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import Modal from '../components/Modal.vue'
+import PinIcon from '../components/PinIcon.vue'
 import { api } from '../composables/useApi'
 import { useMonaco } from '../composables/useMonaco'
 import type { TemplateInfo } from '../types'
 
 const { editorEl, setValue, getValue, format } = useMonaco()
 
+// 内嵌种子模板的特殊 key（与后端一致，不落盘）
+const BUILTIN = 'builtin'
+
 // 模板列表即 tab 集合：有几个模板就显示几个 tab
 const templates = ref<TemplateInfo[]>([])
 const currentUuid = ref<string | null>(null)
 const showHelp = ref(false)
+const showCreate = ref(false)
+const createFrom = ref(BUILTIN)
+const createName = ref('')
+const createError = ref('')
+// 未保存修改确认（切换 tab 前）
+const showUnsaved = ref(false)
+const pendingUuid = ref<string | null>(null)
+// 当前编辑器内容对应的“已保存”快照，用于脏检测
+const savedContent = ref('')
 const error = ref('')
 const notice = ref('')
 let noticeTimer: ReturnType<typeof setTimeout> | undefined
@@ -35,37 +48,87 @@ async function loadList(): Promise<void> {
 }
 
 /** 激活某模板：读取内容到编辑器（不做本地缓存） */
+/** 当前是否有未保存的修改 */
+function isDirty(): boolean {
+  return currentUuid.value !== null && getValue() !== savedContent.value
+}
+
+/** 打开/切换到某模板（不做本地缓存）；有未保存修改时先弹确认 */
 async function activate(uuid: string): Promise<void> {
   if (currentUuid.value === uuid && getValue() !== '') return
+  if (currentUuid.value !== null && isDirty()) {
+    pendingUuid.value = uuid
+    showUnsaved.value = true
+    return
+  }
+  await doActivate(uuid)
+}
+
+async function doActivate(uuid: string): Promise<void> {
   currentUuid.value = uuid
   try {
     const data = await api<unknown>(`/api/templates/${uuid}`)
     setValue(JSON.stringify(data, null, 2))
+    savedContent.value = getValue()
     error.value = ''
   } catch (e) {
     error.value = '加载失败: ' + (e as Error).message
   }
 }
 
-async function createTemplate(): Promise<void> {
-  const name = prompt('输入模板名称')
-  if (!name) return
+/** 未保存确认弹框：先保存当前模板，成功后再切换 */
+async function confirmSwitchWithSave(): Promise<void> {
+  const ok = await saveTemplate()
+  if (!ok) return
+  const target = pendingUuid.value
+  showUnsaved.value = false
+  pendingUuid.value = null
+  if (target) await doActivate(target)
+}
+
+/** 未保存确认弹框：取消切换，留在当前模板 */
+function cancelSwitch(): void {
+  showUnsaved.value = false
+  pendingUuid.value = null
+}
+
+/** 打开新建弹框 */
+function openCreate(): void {
+  createError.value = ''
+  createFrom.value = BUILTIN
+  createName.value = ''
+  showCreate.value = true
+}
+
+/** 新建模板：从内置种子或某个已有用户模板复制内容 */
+async function submitCreate(): Promise<void> {
+  const name = createName.value.trim()
+  if (!name) {
+    createError.value = '请输入模板名称'
+    return
+  }
+  if (templates.value.some((t) => t.name === name)) {
+    createError.value = `已存在同名模板“${name}”`
+    return
+  }
   try {
-    const created = await api<TemplateInfo>('/api/templates?name=' + encodeURIComponent(name), {
-      method: 'POST',
-    })
+    const created = await api<TemplateInfo>(
+      '/api/templates?name=' + encodeURIComponent(name) + '&from=' + encodeURIComponent(createFrom.value),
+      { method: 'POST' },
+    )
     await loadList()
-    currentUuid.value = null // 强制重新读取新模板内容
     await activate(created.uuid)
+    showCreate.value = false
+    flashNotice('已创建')
   } catch (e) {
-    error.value = '新建失败: ' + (e as Error).message
+    createError.value = '新建失败: ' + (e as Error).message
   }
 }
 
-async function saveTemplate(): Promise<void> {
+async function saveTemplate(): Promise<boolean> {
   if (!currentUuid.value) {
     error.value = '请先选择模板'
-    return
+    return false
   }
   try {
     JSON.parse(getValue())
@@ -74,9 +137,12 @@ async function saveTemplate(): Promise<void> {
       headers: { 'Content-Type': 'application/json' },
       body: getValue(),
     })
+    savedContent.value = getValue()
     flashNotice('已保存')
+    return true
   } catch (e) {
     error.value = '保存失败: ' + (e as Error).message
+    return false
   }
 }
 
@@ -111,14 +177,17 @@ async function removeCurrent(): Promise<void> {
   if (!confirm(`删除模板 ${t.name}？`)) return
   try {
     await api(`/api/templates/${t.uuid}`, { method: 'DELETE' })
+    // 当前模板已被删除，编辑内容随之作废，清空脏状态后自动切到默认/第一个模板
+    showUnsaved.value = false
+    pendingUuid.value = null
     await loadList()
     if (currentUuid.value === t.uuid) {
       currentUuid.value = null
       setValue('')
+      savedContent.value = ''
     }
-    // 自动激活默认模板（或第一个），保持编辑器不空
     const def = templates.value.find((x) => x.default) ?? templates.value[0]
-    if (def) await activate(def.uuid)
+    if (def) await doActivate(def.uuid)
   } catch (e) {
     error.value = '删除失败: ' + (e as Error).message
   }
@@ -134,9 +203,30 @@ onMounted(async () => {
 <template>
   <main>
     <div class="page">
-      <!-- 顶栏：新建按钮 + tab（= 全部模板）+ 约定帮助 -->
-      <div class="top-row">
-        <button id="new-tpl" @click="createTemplate">+ 新建</button>
+      <!-- 顶栏：固定工具按钮 + 可横向滚动的 tab 列表 -->
+      <div class="tab-bar">
+        <div class="tab-actions">
+          <button class="tab-new" title="模板约定" @click="showHelp = true">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+          </button>
+          <button class="tab-new" title="新建模板" @click="openCreate">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
+            </svg>
+          </button>
+        </div>
         <div class="tabs">
           <div
             v-for="t in templates"
@@ -146,10 +236,12 @@ onMounted(async () => {
             :title="t.default ? '默认模板' : ''"
             @click="activate(t.uuid)"
           >
-            <span class="tab-name">{{ t.default ? '★ ' : '' }}{{ t.name }}</span>
+            <span class="tab-name">
+              <PinIcon v-if="t.default" class="pin-mark" />
+              <span class="tab-text">{{ t.name }}</span>
+            </span>
           </div>
         </div>
-        <button class="help-btn" title="模板约定" @click="showHelp = true">?</button>
       </div>
 
       <div class="toolbar">
@@ -163,8 +255,46 @@ onMounted(async () => {
         <span class="ok" v-if="notice">{{ notice }}</span>
         <span class="error" v-else-if="error">{{ error }}</span>
       </div>
-      <div ref="editorEl" id="editor"></div>
+
+      <div class="editor-area">
+        <div ref="editorEl" id="editor"></div>
+        <div v-if="templates.length === 0 && !currentUuid" class="empty-mask">
+          <p class="empty-title">暂无模板</p>
+          <p class="empty-tip">点击上方 “+ 新建”，从内置默认模板创建一个用户模板后再编辑。</p>
+        </div>
+      </div>
     </div>
+
+    <!-- 新建模板 -->
+    <Modal v-if="showCreate" title="新建模板" @close="showCreate = false">
+      <p v-if="createError" class="error modal-error">{{ createError }}</p>
+      <div class="field">
+        <label>基于</label>
+        <select v-model="createFrom">
+          <option value="builtin">内置默认模板</option>
+          <option v-for="t in templates" :key="t.uuid" :value="t.uuid">
+            {{ t.name }}{{ t.default ? '（默认）' : '' }}
+          </option>
+        </select>
+      </div>
+      <div class="field">
+        <label>模板名称</label>
+        <input v-model="createName" type="text" placeholder="输入新模板名称" @keyup.enter="submitCreate" />
+      </div>
+      <div class="form-actions">
+        <button id="create-confirm" @click="submitCreate">创建</button>
+        <button class="btn-cancel" @click="showCreate = false">取消</button>
+      </div>
+    </Modal>
+
+    <!-- 未保存确认（切换模板前） -->
+    <Modal v-if="showUnsaved" title="未保存的修改" @close="cancelSwitch">
+      <p class="modal-tip">当前模板有未保存的修改，是否先保存再切换？</p>
+      <div class="form-actions">
+        <button id="save-switch" @click="confirmSwitchWithSave">保存</button>
+        <button class="btn-cancel" @click="cancelSwitch">取消</button>
+      </div>
+    </Modal>
 
     <!-- 模板约定帮助 -->
     <Modal v-if="showHelp" title="模板约定" @close="showHelp = false">
@@ -202,10 +332,17 @@ main {
   padding: 0.8rem 1rem 1rem;
   box-sizing: border-box;
 }
-.top-row {
+/* tab 栏容器：左侧固定工具按钮 + 右侧可滚动 tab 列表，共享底部边框 */
+.tab-bar {
   display: flex;
   align-items: flex-end;
-  gap: 0.5rem;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--surface-3);
+  flex-shrink: 0;
+}
+.tab-actions {
+  display: flex;
+  align-items: flex-end;
   flex-shrink: 0;
 }
 button {
@@ -217,19 +354,39 @@ button {
 button:hover {
   filter: brightness(0.92);
 }
-#new-tpl {
-  padding: 0.45rem 0.8rem;
-  background: var(--brand);
-  color: #fff;
-  font-size: 0.9rem;
-  flex-shrink: 0;
-}
 .tabs {
   display: flex;
+  align-items: flex-end;
   overflow-x: auto;
+  overflow-y: hidden;
   flex: 1;
   min-width: 0;
-  border-bottom: 1px solid var(--surface-3);
+  /* 隐藏横向滚动条（多 tab 时仍可横向滚动） */
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+.tab-new {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.7rem;
+  height: 1.7rem;
+  margin: 0 0.2rem 0.15rem 0;
+  padding: 0;
+  background: none;
+  color: var(--text-2);
+  border-radius: var(--radius-1);
+}
+.tab-new:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+.tab-new svg {
+  width: 1rem;
+  height: 1rem;
 }
 .tab {
   display: flex;
@@ -255,23 +412,18 @@ button:hover {
   top: 1px;
 }
 .tab-name {
+  display: inline-flex;
+  align-items: center;
   max-width: 160px;
+}
+.tab-text {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.help-btn {
-  width: 1.6rem;
-  height: 1.6rem;
-  font-size: 0.9rem;
-  background: var(--surface-3);
-  color: var(--text-2);
-  border-radius: 50%;
+.pin-mark {
+  margin-right: 0.25rem;
   flex-shrink: 0;
-  margin-bottom: 0.4rem;
-}
-.help-btn:hover {
-  background: var(--surface-4);
-  color: var(--text-1);
 }
 .toolbar {
   display: flex;
@@ -304,12 +456,77 @@ button:hover {
   background: var(--red-7);
   color: #fff;
 }
-#editor {
+.editor-area {
   flex: 1;
+  position: relative;
+  min-height: 0;
+}
+#editor {
+  position: absolute;
+  inset: 0;
   border: 1px solid var(--surface-3);
   border-radius: var(--radius-2);
   overflow: hidden;
-  min-height: 0;
+}
+.empty-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: var(--surface-2);
+  border: 1px dashed var(--surface-4);
+  border-radius: var(--radius-2);
+}
+.empty-title {
+  font-size: 1rem;
+  font-weight: var(--font-weight-7);
+  color: var(--text-2);
+  margin: 0;
+}
+.empty-tip {
+  font-size: 0.85rem;
+  color: var(--text-2);
+  margin: 0;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0.8rem;
+}
+label {
+  font-size: 0.85rem;
+  margin-bottom: 4px;
+  color: var(--text-2);
+}
+select,
+input {
+  padding: 0.45rem;
+  border: 1px solid var(--surface-3);
+  border-radius: var(--radius-2);
+  font-size: 0.9rem;
+  background: var(--surface-1);
+  color: var(--text-1);
+  width: 100%;
+  box-sizing: border-box;
+}
+.form-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+#create-confirm {
+  background: var(--brand);
+  color: #fff;
+  padding: 0.5rem 1rem;
+}
+.form-actions .btn-cancel {
+  background: var(--surface-3);
+  color: var(--text-1);
+  padding: 0.5rem 1rem;
 }
 .help-list {
   margin: 0;
@@ -330,11 +547,25 @@ button:hover {
   font-family: var(--font-monospace-code);
   font-size: 0.85rem;
 }
+#save-switch {
+  background: var(--green-7);
+  color: #fff;
+  padding: 0.5rem 1rem;
+}
 .error {
   color: var(--red-7);
   margin-left: 0.5rem;
   white-space: pre-wrap;
   font-size: 0.85rem;
+}
+.modal-error {
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+}
+.modal-tip {
+  margin: 0 0 0.4rem;
+  font-size: 0.9rem;
+  color: var(--text-1);
 }
 .ok {
   color: var(--green-7);
