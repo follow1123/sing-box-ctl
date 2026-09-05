@@ -13,11 +13,13 @@ const (
 )
 
 type options struct {
-	workingDir string
-	host       string
-	port       int
-	version    bool
-	command    string
+	workingDir         string
+	host               string
+	port               int
+	certificateFile    string
+	certificateKeyFile string
+	version            bool
+	command            string
 }
 
 func Execute() {
@@ -40,10 +42,12 @@ func Execute() {
 			printUsage()
 			os.Exit(1)
 		}
-		if err := serveCmd(opts.workingDir, opts.host, opts.port); err != nil {
+		if err := serveCmd(opts.workingDir, opts); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
+	case "help":
+		printUsage()
 	case "version":
 		printVersion()
 	case "":
@@ -83,6 +87,18 @@ func parseArgs(args []string) (*options, error) {
 				return nil, fmt.Errorf("invalid port: %s", args[i])
 			}
 			opts.port = port
+		case "--certificate-file":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("flag %s requires a value", arg)
+			}
+			i++
+			opts.certificateFile = args[i]
+		case "--certificate-key-file":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("flag %s requires a value", arg)
+			}
+			i++
+			opts.certificateKeyFile = args[i]
 		case "-v", "--version":
 			opts.version = true
 		case "serve", "version", "help":
@@ -115,11 +131,18 @@ commands:
 flags:
   -d <dir>        working directory (required for serve)
   --listen <host> listen address (default 127.0.0.1, use 0.0.0.0 for LAN access)
-  -p <port>       webui port (default 8080)
+  -p <port>       webui port (default 9112)
+  --certificate-file <path>     TLS certificate file (PEM)
+  --certificate-key-file <path> TLS certificate private key file (PEM)
   -v              print version
 
 config:
-  optional <dir>/config.json: listen, port, certificate_file, certificate_key_file
-  (command-line flags take precedence over the file)
+  optional <dir>/config.json with same options:
+  listen, port, certificate_file, certificate_key_file
+
+resolution order for every option: command line > config.json > built-in default.
+path bases: relative command-line paths are based on the current directory;
+  relative config.json paths are based on the working directory.
+certificate file and key file must be configured as a pair.
 `)
 }

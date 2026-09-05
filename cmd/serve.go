@@ -10,12 +10,27 @@ import (
 	"github.com/follow1123/sing-box-ctl/webui"
 )
 
+// 代码写死的默认值；任一选项最终生效顺序：命令行 > config.json > 此处默认值
 const (
 	defaultListen = "127.0.0.1"
-	defaultPort   = 8080
+	defaultPort   = 9112
 )
 
-// serverFileConfig 对应 working_dir/config.json（可选），命令行显式参数优先于文件
+// serveConfig 生效后的监听与证书配置
+type serveConfig struct {
+	listen   string
+	port     int
+	certFile string
+	keyFile  string
+}
+
+// defaultServeConfig 返回代码写死的默认配置（无证书 = http）
+func defaultServeConfig() serveConfig {
+	return serveConfig{listen: defaultListen, port: defaultPort}
+}
+
+// serverFileConfig 对应 working_dir/config.json（可选文件）。
+// 其中证书相对路径以 working_dir 为基准解析。
 type serverFileConfig struct {
 	Port               int    `json:"port"`
 	Listen             string `json:"listen"`
@@ -23,20 +38,18 @@ type serverFileConfig struct {
 	CertificateKeyFile string `json:"certificate_key_file"`
 }
 
-// mergedConfig 合并 CLI / 配置文件 / 默认值后的最终配置
-type mergedConfig struct {
-	listen   string
-	port     int
-	certFile string
-	keyFile  string
-}
+func serveCmd(workingDir string, cli *options) error {
+	// 生效顺序：默认值 -> 配置文件 -> 命令行
+	cfg := defaultServeConfig()
 
-func serveCmd(workingDir, cliListen string, cliPort int) error {
 	fileCfg, err := loadServerFileConfig(workingDir)
 	if err != nil {
 		return err
 	}
-	cfg := mergeServerConfig(cliListen, cliPort, fileCfg, workingDir)
+	cfg.overrideFromFile(fileCfg, workingDir)
+
+	cfg.overrideFromCLI(cli)
+
 	if err := cfg.validate(); err != nil {
 		return err
 	}
@@ -70,33 +83,46 @@ func loadServerFileConfig(workingDir string) (*serverFileConfig, error) {
 	return cfg, nil
 }
 
-// mergeServerConfig 合并优先级：命令行显式参数 > 配置文件 > 内置默认值。
-// 证书路径为相对路径时基于工作目录解析。
-func mergeServerConfig(cliListen string, cliPort int, file *serverFileConfig, workingDir string) mergedConfig {
-	cfg := mergedConfig{listen: defaultListen, port: defaultPort}
-	if file != nil {
-		if file.Listen != "" {
-			cfg.listen = file.Listen
-		}
-		if file.Port > 0 {
-			cfg.port = file.Port
-		}
-		cfg.certFile = resolvePath(workingDir, file.CertificateFile)
-		cfg.keyFile = resolvePath(workingDir, file.CertificateKeyFile)
+// overrideFromFile 用配置文件覆盖当前配置（字段缺失或零值则跳过）。
+// 证书两个字段只要出现任一即整体按配置文件的证书对处理。
+func (c *serveConfig) overrideFromFile(file *serverFileConfig, workingDir string) {
+	if file == nil {
+		return
 	}
-	if cliListen != "" {
-		cfg.listen = cliListen
+	if file.Port > 0 {
+		c.port = file.Port
 	}
-	if cliPort > 0 {
-		cfg.port = cliPort
+	if file.Listen != "" {
+		c.listen = file.Listen
 	}
-	return cfg
+	if file.CertificateFile != "" || file.CertificateKeyFile != "" {
+		c.certFile = resolvePath(workingDir, file.CertificateFile)
+		c.keyFile = resolvePath(workingDir, file.CertificateKeyFile)
+	}
 }
 
-// validate 校验合并后的配置：证书需成对存在且文件可达
-func (c mergedConfig) validate() error {
+// overrideFromCLI 用命令行显式参数覆盖当前配置（未显式提供的字段跳过）。
+// 证书相对路径按当前执行目录解析。
+func (c *serveConfig) overrideFromCLI(cli *options) {
+	if cli == nil {
+		return
+	}
+	if cli.host != "" {
+		c.listen = cli.host
+	}
+	if cli.port > 0 {
+		c.port = cli.port
+	}
+	if cli.certificateFile != "" || cli.certificateKeyFile != "" {
+		c.certFile = resolveCwdPath(cli.certificateFile)
+		c.keyFile = resolveCwdPath(cli.certificateKeyFile)
+	}
+}
+
+// validate 校验生效配置：证书与私钥需成对配置且文件存在
+func (c serveConfig) validate() error {
 	if (c.certFile == "") != (c.keyFile == "") {
-		return fmt.Errorf("certificate_file and certificate_key_file must be set together in config.json")
+		return fmt.Errorf("certificate file and key file must be configured as a pair")
 	}
 	if c.certFile == "" {
 		return nil
@@ -109,7 +135,7 @@ func (c mergedConfig) validate() error {
 	return nil
 }
 
-// resolvePath 相对路径基于工作目录解析；支持环境变量与绝对路径
+// resolvePath 相对路径基于 working_dir 解析（用于 config.json）；支持环境变量与绝对路径
 func resolvePath(workingDir, p string) string {
 	if p == "" {
 		return ""
@@ -119,4 +145,17 @@ func resolvePath(workingDir, p string) string {
 		return filepath.Clean(p)
 	}
 	return filepath.Join(workingDir, p)
+}
+
+// resolveCwdPath 命令行传入的相对路径按当前执行目录解析；支持环境变量与绝对路径
+func resolveCwdPath(p string) string {
+	if p == "" {
+		return ""
+	}
+	p = os.ExpandEnv(p)
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return filepath.Clean(p)
+	}
+	return filepath.Clean(abs)
 }
