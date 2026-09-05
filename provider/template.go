@@ -194,6 +194,29 @@ func (p *Provider) ReadTemplate(uuid string) ([]byte, error) {
 	return data, nil
 }
 
+// TemplateVersions 返回模板存在的历史版本（按 current/last/old 顺序）
+func (p *Provider) TemplateVersions(uuid string) ([]string, error) {
+	if !p.TemplateExists(uuid) {
+		return nil, fmt.Errorf("no template with uuid: %s", uuid)
+	}
+	return versionsInDir(p.TemplateDir(uuid))
+}
+
+// RestoreTemplate 用指定历史版本覆盖当前内容（会再次滚动保留一层历史）
+func (p *Provider) RestoreTemplate(uuid, version string) error {
+	if !p.TemplateExists(uuid) {
+		return fmt.Errorf("no template with uuid: %s", uuid)
+	}
+	if !isValidVersion(version) {
+		return fmt.Errorf("invalid version: %s", version)
+	}
+	data, err := readVersionFile(p.TemplateDir(uuid), version)
+	if err != nil {
+		return err
+	}
+	return p.SaveTemplate(uuid, data)
+}
+
 func (p *Provider) readTemplateName(uuid string) (string, error) {
 	data, err := os.ReadFile(filepath.Join(p.TemplateDir(uuid), "name"))
 	if err != nil {

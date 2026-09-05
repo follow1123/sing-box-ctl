@@ -248,6 +248,28 @@ func (s *Server) providerHandle(w http.ResponseWriter, r *http.Request) {
 		s.fetchHandle(w, r, p, uuid)
 	case len(parts) == 2 && parts[1] == "upload" && r.Method == http.MethodPost:
 		s.uploadHandle(w, r, p, uuid)
+	case len(parts) == 2 && parts[1] == "versions" && r.Method == http.MethodGet:
+		if p.Get(uuid) == nil {
+			handleError(w, fmt.Errorf("no provider with uuid: %s", uuid), http.StatusNotFound)
+			return
+		}
+		vers, err := p.SubscriptionVersions(uuid)
+		if err != nil {
+			handleInternalServerError(w, err)
+			return
+		}
+		writeJSON(w, vers)
+	case len(parts) == 2 && parts[1] == "restore" && r.Method == http.MethodPost:
+		if p.Get(uuid) == nil {
+			handleError(w, fmt.Errorf("no provider with uuid: %s", uuid), http.StatusNotFound)
+			return
+		}
+		if err := p.RestoreSubscription(uuid, r.URL.Query().Get("version")); err != nil {
+			handleError(w, err, http.StatusBadRequest)
+			return
+		}
+		log.Printf("provider '%s' restored to version: %s", uuid, r.URL.Query().Get("version"))
+		writeJSON(w, map[string]any{"ok": true})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -452,6 +474,20 @@ func (s *Server) templateHandle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, p.GetTemplate(uuid))
+	case len(parts) == 2 && parts[1] == "versions" && r.Method == http.MethodGet:
+		vers, err := p.TemplateVersions(uuid)
+		if err != nil {
+			handleInternalServerError(w, err)
+			return
+		}
+		writeJSON(w, vers)
+	case len(parts) == 2 && parts[1] == "restore" && r.Method == http.MethodPost:
+		if err := p.RestoreTemplate(uuid, r.URL.Query().Get("version")); err != nil {
+			handleError(w, err, http.StatusBadRequest)
+			return
+		}
+		log.Printf("template '%s' restored to version: %s", uuid, r.URL.Query().Get("version"))
+		writeJSON(w, map[string]any{"ok": true})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}

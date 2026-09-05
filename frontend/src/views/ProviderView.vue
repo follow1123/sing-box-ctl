@@ -2,6 +2,7 @@
 import { ref, watch, onMounted } from 'vue'
 import ContentPage from '../components/ContentPage.vue'
 import Modal from '../components/Modal.vue'
+import VersionDialog, { type VersionItem } from '../components/VersionDialog.vue'
 import { api } from '../composables/useApi'
 import type { ProviderConfig, ProviderRequest } from '../types'
 
@@ -16,6 +17,45 @@ const submitLabel = ref('添加')
 const editingUuid = ref<string | null>(null)
 const form = ref<ProviderRequest>({ name: '', url: '', source: 'url', message: '' })
 const fileInput = ref<File | null>(null)
+
+// 历史版本弹框
+const showVersions = ref(false)
+const versionItems = ref<VersionItem[]>([])
+const versionUuid = ref('')
+const VERSION_LABELS: Record<string, string> = {
+  current: '当前版本',
+  last: '上次版本',
+  old: '上上次版本',
+}
+
+async function openVersions(p: ProviderConfig): Promise<void> {
+  try {
+    const vers = await api<string[]>(`/api/providers/${p.uuid}/versions`)
+    versionItems.value = vers.map((v) => ({
+      version: v,
+      label: VERSION_LABELS[v] ?? v,
+      isCurrent: v === 'current',
+    }))
+    versionUuid.value = p.uuid
+    showVersions.value = true
+    error.value = ''
+  } catch (e) {
+    error.value = '加载版本失败: ' + (e as Error).message
+  }
+}
+
+async function restoreVersion(version: string): Promise<void> {
+  try {
+    await api(`/api/providers/${versionUuid.value}/restore?version=${encodeURIComponent(version)}`, {
+      method: 'POST',
+    })
+    showVersions.value = false
+    notice.value = '已还原为' + (VERSION_LABELS[version] ?? version)
+    await load()
+  } catch (e) {
+    error.value = '还原失败: ' + (e as Error).message
+  }
+}
 
 async function load(): Promise<void> {
   try {
@@ -178,6 +218,7 @@ onMounted(load)
             <button class="btn-fetch" @click="p.source === 'upload' ? uploadSub(p) : fetchSub(p)">
               {{ p.source === 'upload' ? '上传' : '更新' }}
             </button>
+            <button class="btn-ver" @click="openVersions(p)">版本</button>
             <button class="btn-del" @click="remove(p)">删除</button>
           </td>
         </tr>
@@ -216,6 +257,15 @@ onMounted(load)
         </div>
       </form>
     </Modal>
+
+    <!-- 历史版本弹框 -->
+    <VersionDialog
+      v-if="showVersions"
+      :items="versionItems"
+      empty="暂无版本记录，先更新或上传订阅一次"
+      @close="showVersions = false"
+      @restore="restoreVersion"
+    />
   </ContentPage>
 </template>
 
@@ -334,7 +384,7 @@ table tbody tr:last-child td {
   width: 76px;
 }
 .actions {
-  width: 150px;
+  width: 210px;
   white-space: nowrap;
 }
 .actions button {
@@ -344,6 +394,9 @@ table tbody tr:last-child td {
 }
 .actions .btn-fetch {
   background: var(--green-7);
+}
+.actions .btn-ver {
+  background: var(--indigo-7);
 }
 .actions .btn-del {
   background: var(--red-7);

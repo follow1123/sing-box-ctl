@@ -3,6 +3,7 @@ package webui
 import (
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -157,4 +158,97 @@ func TestDefaultFlagFlow(t *testing.T) {
 	require.NoError(t, err)
 	defer delResp.Body.Close()
 	require.Equal(t, http.StatusBadRequest, delResp.StatusCode)
+}
+
+func TestTemplateVersionsRestoreAPI(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+
+	_, body := postTemplate(t, ts, "t", "")
+	var created struct {
+		Uuid string `json:"uuid"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &created))
+	uuid := created.Uuid
+
+	// 保存两版以产生 last/old
+	put := func(content string) {
+		req, err := http.NewRequest(http.MethodPut, ts.URL+"/api/templates/"+uuid, strings.NewReader(content))
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+	}
+	put(`{"v": 1}`)
+	put(`{"v": 2}`)
+
+	// 版本列表
+	code, vBody := getBody(t, ts.URL+"/api/templates/"+uuid+"/versions")
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, `["current","last","old"]`, strings.TrimSpace(vBody))
+
+	// 还原 old（内容是种子）
+	resp, err := http.Post(ts.URL+"/api/templates/"+uuid+"/restore?version=old", "", nil)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	code, content := getBody(t, ts.URL+"/api/templates/"+uuid)
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, string(templateSeedData), content)
+
+	// 非法版本
+	resp, err = http.Post(ts.URL+"/api/templates/"+uuid+"/restore?version=nope", "", nil)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestProviderVersionsRestoreAPI(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+
+	// 添加 upload 来源 provider
+	reqBody := `{"name":"p","source":"upload"}`
+	resp, err := http.Post(ts.URL+"/api/providers", "application/json", strings.NewReader(reqBody))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	var created struct {
+		Uuid string `json:"uuid"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&created))
+	uuid := created.Uuid
+
+	upload := func(content string) {
+		body := &strings.Builder{}
+		w := multipart.NewWriter(body)
+		fw, err := w.CreateFormFile("file", "sub.yaml")
+		require.NoError(t, err)
+		fw.Write([]byte(content))
+		w.Close()
+
+		req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/providers/"+uuid+"/upload", strings.NewReader(body.String()))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", w.FormDataContentType())
+		r, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer r.Body.Close()
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	}
+
+	upload("c0")
+	upload("c1")
+	upload("c2")
+
+	code, vBody := getBody(t, ts.URL+"/api/providers/"+uuid+"/versions")
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, `["current","last","old"]`, strings.TrimSpace(vBody))
+
+	// 还原 last
+	r, err := http.Post(ts.URL+"/api/providers/"+uuid+"/restore?version=old", "", nil)
+	require.NoError(t, err)
+	r.Body.Close()
+	require.Equal(t, http.StatusOK, r.StatusCode)
 }

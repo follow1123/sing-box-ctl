@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import Modal from '../components/Modal.vue'
 import PinIcon from '../components/PinIcon.vue'
+import VersionDialog, { type VersionItem } from '../components/VersionDialog.vue'
 import { api } from '../composables/useApi'
 import { useMonaco } from '../composables/useMonaco'
 import type { TemplateInfo } from '../types'
@@ -22,6 +23,16 @@ const createError = ref('')
 // 未保存修改确认（切换 tab 前）
 const showUnsaved = ref(false)
 const pendingUuid = ref<string | null>(null)
+// 历史版本弹框与还原确认
+const showVersions = ref(false)
+const versionItems = ref<VersionItem[]>([])
+const showRestoreConfirm = ref(false)
+const restoreVer = ref('')
+const VERSION_LABELS: Record<string, string> = {
+  current: '当前版本',
+  last: '上次版本',
+  old: '上上次版本',
+}
 // 当前编辑器内容对应的“已保存”快照，用于脏检测
 const savedContent = ref('')
 const error = ref('')
@@ -90,6 +101,64 @@ async function confirmSwitchWithSave(): Promise<void> {
 function cancelSwitch(): void {
   showUnsaved.value = false
   pendingUuid.value = null
+}
+
+/** 打开历史版本弹框 */
+async function openVersions(): Promise<void> {
+  if (!currentUuid.value) return
+  try {
+    const vers = await api<string[]>(`/api/templates/${currentUuid.value}/versions`)
+    versionItems.value = vers.map((v) => ({
+      version: v,
+      label: VERSION_LABELS[v] ?? v,
+      isCurrent: v === 'current',
+    }))
+    showVersions.value = true
+  } catch (e) {
+    error.value = '加载版本失败: ' + (e as Error).message
+  }
+}
+
+/** 点击某个历史版本的“还原”：有未保存修改时先弹三选确认 */
+function onVersionRestore(version: string): void {
+  if (isDirty()) {
+    restoreVer.value = version
+    showRestoreConfirm.value = true
+    return
+  }
+  void doRestore(version, false)
+}
+
+function cancelRestoreConfirm(): void {
+  showRestoreConfirm.value = false
+  restoreVer.value = ''
+}
+
+/** 执行还原；saveFirst 为 true 时先保存当前编辑（保存后当前内容成为“上次版本”） */
+async function doRestore(version: string, saveFirst: boolean): Promise<void> {
+  if (!currentUuid.value) return
+  if (saveFirst && !(await saveTemplate())) return // 保存失败则中止还原
+  try {
+    await api(`/api/templates/${currentUuid.value}/restore?version=${encodeURIComponent(version)}`, {
+      method: 'POST',
+    })
+    showRestoreConfirm.value = false
+    restoreVer.value = ''
+    showVersions.value = false
+    flashNotice('已还原为' + (VERSION_LABELS[version] ?? version))
+    // 编辑器重载为还原后的内容
+    await doActivate(currentUuid.value)
+  } catch (e) {
+    error.value = '还原失败: ' + (e as Error).message
+  }
+}
+
+function confirmRestoreSave(): void {
+  void doRestore(restoreVer.value, true)
+}
+
+function confirmRestoreDiscard(): void {
+  void doRestore(restoreVer.value, false)
 }
 
 /** 打开新建弹框 */
@@ -249,6 +318,7 @@ onMounted(async () => {
         <button id="save" class="btn-save" @click="saveTemplate">保存</button>
         <button id="format" @click="formatTemplate">格式化</button>
         <template v-if="currentInfo()">
+          <button id="versions" @click="openVersions">版本</button>
           <button v-if="!currentInfo()!.default" id="set-default" @click="setCurrentDefault">设为默认</button>
           <button v-if="!currentInfo()!.default" id="del-tpl" @click="removeCurrent">删除</button>
         </template>
@@ -293,6 +363,25 @@ onMounted(async () => {
       <div class="form-actions">
         <button id="save-switch" @click="confirmSwitchWithSave">保存</button>
         <button class="btn-cancel" @click="cancelSwitch">取消</button>
+      </div>
+    </Modal>
+
+    <!-- 历史版本弹框 -->
+    <VersionDialog
+      v-if="showVersions"
+      :items="versionItems"
+      @close="showVersions = false"
+      @restore="onVersionRestore"
+    />
+
+    <!-- 还原历史版本前，当前模板有未保存修改时的三选确认 -->
+    <Modal v-if="showRestoreConfirm" title="还原历史版本" @close="cancelRestoreConfirm">
+      <p class="modal-tip">当前模板有未保存的修改，请选择处理方式：</p>
+      <p class="modal-sub">提示：选择“保存并还原”后，当前编辑会保存为“上次版本”，之后仍可还原回来。</p>
+      <div class="form-actions">
+        <button id="restore-save" @click="confirmRestoreSave">保存并还原</button>
+        <button id="restore-discard" @click="confirmRestoreDiscard">丢弃并还原</button>
+        <button class="btn-cancel" @click="cancelRestoreConfirm">取消</button>
       </div>
     </Modal>
 
@@ -551,6 +640,24 @@ input {
   background: var(--green-7);
   color: #fff;
   padding: 0.5rem 1rem;
+}
+#restore-save {
+  background: var(--green-7);
+  color: #fff;
+  padding: 0.5rem 1rem;
+}
+#restore-discard {
+  background: var(--red-7);
+  color: #fff;
+  padding: 0.5rem 1rem;
+}
+.form-actions .btn-cancel {
+  padding: 0.5rem 1rem;
+}
+.modal-sub {
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+  color: var(--text-2);
 }
 .error {
   color: var(--red-7);

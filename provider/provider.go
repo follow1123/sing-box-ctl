@@ -73,6 +73,29 @@ func (p *Provider) ReadSubscription(uuid string) ([]byte, error) {
 	return data, nil
 }
 
+// SubscriptionVersions 返回订阅数据存在的历史版本（按 current/last/old 顺序）
+func (p *Provider) SubscriptionVersions(uuid string) ([]string, error) {
+	if !p.Exists(uuid) {
+		return nil, fmt.Errorf("no provider with uuid: %s", uuid)
+	}
+	return versionsInDir(p.SubscriptionDir(uuid))
+}
+
+// RestoreSubscription 用指定历史版本覆盖当前订阅（会再次滚动保留一层历史）
+func (p *Provider) RestoreSubscription(uuid, version string) error {
+	if !p.Exists(uuid) {
+		return fmt.Errorf("no provider with uuid: %s", uuid)
+	}
+	if !isValidVersion(version) {
+		return fmt.Errorf("invalid version: %s", version)
+	}
+	data, err := readVersionFile(p.SubscriptionDir(uuid), version)
+	if err != nil {
+		return err
+	}
+	return p.SaveSubscription(uuid, data)
+}
+
 // saveRolling 滚动保存三份：old ← last ← current ← data
 func saveRolling(dir string, data []byte) error {
 	// old ← last
@@ -94,6 +117,41 @@ func saveRolling(dir string, data []byte) error {
 		return fmt.Errorf("save current file error:\n\t%w", err)
 	}
 	return nil
+}
+
+// 历史版本文件名白名单
+const (
+	versionCurrent = "current"
+	versionLast    = "last"
+	versionOld     = "old"
+)
+
+func isValidVersion(v string) bool {
+	switch v {
+	case versionCurrent, versionLast, versionOld:
+		return true
+	}
+	return false
+}
+
+// versionsInDir 按 current/last/old 顺序列出目录中存在的版本文件
+func versionsInDir(dir string) ([]string, error) {
+	versions := make([]string, 0, 3)
+	for _, v := range []string{versionCurrent, versionLast, versionOld} {
+		if _, err := os.Stat(filepath.Join(dir, v)); err == nil {
+			versions = append(versions, v)
+		}
+	}
+	return versions, nil
+}
+
+// readVersionFile 读取指定版本文件内容
+func readVersionFile(dir, version string) ([]byte, error) {
+	data, err := os.ReadFile(filepath.Join(dir, version))
+	if err != nil {
+		return nil, fmt.Errorf("read version '%s' error:\n\t%w", version, err)
+	}
+	return data, nil
 }
 
 // ================= provider 元数据（文件系统实现） =================
