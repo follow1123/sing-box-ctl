@@ -411,7 +411,7 @@ main {
   justify-content: center;
   overflow: hidden;
 }
-/* 内容居中 80%（与其它页面一致），页面自身填满高度，编辑器不随页面滚动 */
+/* 内容居中（与其它页面一致），页面自身填满高度，编辑器不随页面滚动 */
 .page {
   width: min(80%, 1200px);
   height: 100%;
@@ -420,6 +420,17 @@ main {
   flex-direction: column;
   padding: 0.8rem 1rem 1rem;
   box-sizing: border-box;
+}
+@media (min-width: 768px) and (max-width: 1024px) {
+  .page {
+    width: 100%;
+  }
+}
+@media (max-width: 767px) {
+  .page {
+    width: 100%;
+    padding: 0.6rem 0.6rem 0.8rem;
+  }
 }
 /* tab 栏容器：左侧固定工具按钮 + 右侧可滚动 tab 列表，共享底部边框 */
 .tab-bar {
@@ -520,6 +531,18 @@ button:hover {
   align-items: center;
   padding: 0.4rem 0;
   flex-shrink: 0;
+}
+@media (max-width: 767px) {
+  .toolbar {
+    flex-wrap: wrap;
+    row-gap: 0.35rem;
+  }
+  .toolbar .cur-name {
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 .toolbar .cur-name {
   font-size: 0.9rem;

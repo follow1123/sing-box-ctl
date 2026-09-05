@@ -90,6 +90,7 @@ function closeForm(): void {
   showForm.value = false
 }
 
+
 function onFileChange(e: Event): void {
   const el = e.target as HTMLInputElement
   fileInput.value = el.files?.[0] ?? null
@@ -195,35 +196,28 @@ onMounted(load)
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="notice" class="ok">{{ notice }}</p>
 
-    <table>
-      <thead>
-        <tr>
-          <th>名称</th>
-          <th>URL / 文件</th>
-          <th>来源</th>
-          <th>备注</th>
-          <th>操作</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="p in providers" :key="p.uuid">
-          <td class="name">{{ p.name }}</td>
-          <td class="msg ellipsis" :title="p.source === 'upload' ? (p.file_name || '') : p.url">
-            {{ p.source === 'upload' ? p.file_name || '' : p.url }}
-          </td>
-          <td class="src">{{ p.source }}</td>
-          <td class="msg" :title="p.message || ''">{{ p.message || '' }}</td>
-          <td class="actions">
-            <button @click="openEdit(p)">编辑</button>
-            <button class="btn-fetch" @click="p.source === 'upload' ? uploadSub(p) : fetchSub(p)">
-              {{ p.source === 'upload' ? '上传' : '更新' }}
-            </button>
-            <button class="btn-ver" @click="openVersions(p)">版本</button>
-            <button class="btn-del" @click="remove(p)">删除</button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <!-- 统一单列卡片列表（所有端同一套，无详情页，操作全在卡片上） -->
+    <p v-if="providers.length === 0" class="empty-tip">暂无 Provider，点右上角“+ 添加”创建。</p>
+    <div v-else class="pcard-list">
+      <div v-for="p in providers" :key="p.uuid" class="pcard">
+        <div class="pcard-head">
+          <span class="pcard-name">{{ p.name }}</span>
+          <span class="src-tag">{{ p.source }}</span>
+        </div>
+        <div class="pcard-src" :title="p.source === 'upload' ? (p.file_name || '') : p.url">
+          {{ p.source === 'upload' ? (p.file_name || '已上传配置') : p.url }}
+        </div>
+        <div v-if="p.message" class="pcard-msg">{{ p.message }}</div>
+        <div class="pcard-actions">
+          <button class="btn-edit" @click="openEdit(p)">编辑</button>
+          <button class="btn-fetch" @click="p.source === 'upload' ? uploadSub(p) : fetchSub(p)">
+            {{ p.source === 'upload' ? '上传' : '更新' }}
+          </button>
+          <button class="btn-ver" @click="openVersions(p)">版本</button>
+          <button class="btn-del" @click="remove(p)">删除</button>
+        </div>
+      </div>
+    </div>
 
     <Modal v-if="showForm" :title="formTitle" @close="closeForm">
       <form @submit.prevent="submit">
@@ -329,77 +323,94 @@ button:hover {
   background: var(--brand);
   color: #fff;
 }
-table {
-  width: 100%;
-  table-layout: fixed;
-  /* separate + overflow hidden：让外层边框/背景圆角生效并裁掉内部直角，
-     collapse 模式下圆角无法干净渲染（这正是此前尖角/底部圆角问题的根源） */
-  border-collapse: separate;
-  border-spacing: 0;
+/* 统一单列卡片列表（所有断点） */
+.pcard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.pcard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.7rem 0.85rem;
   background: var(--surface-2);
   border: 1px solid var(--surface-3);
   border-radius: var(--radius-2);
-  overflow: hidden;
 }
-th,
-td {
-  border-bottom: 1px solid var(--surface-3);
-  padding: 0.5rem;
-  text-align: left;
-  font-size: 0.9rem;
+.pcard-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
 }
-th {
-  background: var(--surface-3);
+.pcard-name {
+  font-size: 0.95rem;
+  font-weight: var(--font-weight-6);
   color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-tr:last-child td {
-  border-bottom: none;
-}
-/* normalize 会给表头首/末列与末行首/末列单独加更大的内缩圆角（--nice-inner-radius），
-   与外层 table 的小圆角不协调；这里清零，四角统一由 table 外层圆角控制 */
-table thead tr:first-child th {
-  border-start-start-radius: 0;
-  border-start-end-radius: 0;
-}
-table tbody tr:last-child td {
-  border-end-start-radius: 0;
-  border-end-end-radius: 0;
-}
-.msg {
+.src-tag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 0.7rem;
+  background: var(--surface-3);
+  border-radius: 999px;
   color: var(--text-2);
-  font-size: 0.82rem;
 }
-/* 长 URL/备注单行省略，悬停显示完整内容 */
-.ellipsis {
+.pcard-src {
+  font-size: 0.78rem;
+  color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.name {
+.pcard-msg {
+  font-size: 0.75rem;
+  color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.src {
-  width: 76px;
+/* 操作：小按钮、统一靠左，分隔线隔开 */
+.pcard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--surface-3);
 }
-.actions {
-  width: 210px;
-  white-space: nowrap;
+.pcard-actions button {
+  padding: 0.28rem 0.7rem;
+  font-size: 0.8rem;
 }
-.actions button {
-  margin-right: 0.3rem;
-  padding: 0.3rem 0.7rem;
-  font-size: 0.85rem;
+.empty-tip {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-2);
 }
-.actions .btn-fetch {
-  background: var(--green-7);
+.btn-detail,
+.btn-del {
+  color: #fff;
 }
-.actions .btn-ver {
-  background: var(--indigo-7);
-}
-.actions .btn-del {
+.btn-del {
   background: var(--red-7);
+}
+.btn-fetch {
+  background: var(--green-7);
+  color: #fff;
+}
+.btn-ver {
+  background: var(--indigo-7);
+  color: #fff;
+}
+.btn-edit {
+  background: var(--brand);
+  color: #fff;
 }
 .error {
   color: var(--red-7);

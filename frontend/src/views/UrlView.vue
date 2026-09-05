@@ -473,6 +473,12 @@ button:hover {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
 }
+@media (max-width: 767px) {
+  .select-grid,
+  .option-grid {
+    grid-template-columns: 1fr;
+  }
+}
 select,
 input {
   padding: 0.45rem;
