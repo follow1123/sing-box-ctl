@@ -406,7 +406,7 @@ onMounted(async () => {
 
 <style scoped>
 main {
-  flex: 1;
+  height: 100%;
   display: flex;
   justify-content: center;
   overflow: hidden;

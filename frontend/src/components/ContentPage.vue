@@ -1,19 +1,12 @@
 <template>
-  <!-- 滚动区占满视口宽度，滚动条贴在窗口最右；内容在内部居中 -->
-  <div class="scroll-area">
-    <div class="content-page">
-      <slot />
-    </div>
+  <!-- 页面内容宽度容器：滚动由 App 的 main 统一负责，这里只做居中与断点宽度 -->
+  <div class="content-page">
+    <slot />
   </div>
 </template>
 
 <style scoped>
-.scroll-area {
-  flex: 1;
-  width: 100%;
-  overflow-y: auto;
-}
-/* 手机（<768px）：主内容 ~92%；平板（768-1024px）：占满；桌面（>1024px）：80% 居中 */
+/* 手机（<768px）：约 92%；平板（768-1024px）：占满；桌面（>1024px）：80% 居中 */
 .content-page {
   width: min(92%, 1200px);
   margin: 0 auto;
