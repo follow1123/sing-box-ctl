@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import Modal from '../components/Modal.vue'
-import PinIcon from '../components/PinIcon.vue'
+import Btn from '../components/ui/Btn.vue'
+import Field from '../components/ui/Field.vue'
+import Select from '../components/ui/Select.vue'
 import VersionDialog, { type VersionItem } from '../components/VersionDialog.vue'
 import { api } from '../composables/useApi'
 import { useMonaco } from '../composables/useMonaco'
+import { toast } from '../composables/useToast'
 import type { TemplateInfo } from '../types'
 
 const { editorEl, setValue, getValue, format } = useMonaco()
@@ -12,15 +15,15 @@ const { editorEl, setValue, getValue, format } = useMonaco()
 // 内嵌种子模板的特殊 key（与后端一致，不落盘）
 const BUILTIN = 'builtin'
 
-// 模板列表即 tab 集合：有几个模板就显示几个 tab
 const templates = ref<TemplateInfo[]>([])
 const currentUuid = ref<string | null>(null)
+// 下拉选择值（与 currentUuid 保持同步；切换被取消时回滚到 currentUuid）
+const curSel = ref('')
 const showHelp = ref(false)
 const showCreate = ref(false)
 const createFrom = ref(BUILTIN)
 const createName = ref('')
-const createError = ref('')
-// 未保存修改确认（切换 tab 前）
+// 未保存修改确认（切换模板前）
 const showUnsaved = ref(false)
 const pendingUuid = ref<string | null>(null)
 // 历史版本弹框与还原确认
@@ -35,16 +38,6 @@ const VERSION_LABELS: Record<string, string> = {
 }
 // 当前编辑器内容对应的“已保存”快照，用于脏检测
 const savedContent = ref('')
-const error = ref('')
-const notice = ref('')
-let noticeTimer: ReturnType<typeof setTimeout> | undefined
-
-function flashNotice(msg: string): void {
-  error.value = ''
-  notice.value = msg
-  if (noticeTimer) clearTimeout(noticeTimer)
-  noticeTimer = setTimeout(() => (notice.value = ''), 2000)
-}
 
 function currentInfo(): TemplateInfo | undefined {
   return templates.value.find((t) => t.uuid === currentUuid.value)
@@ -54,17 +47,21 @@ async function loadList(): Promise<void> {
   try {
     templates.value = await api<TemplateInfo[]>('/api/templates')
   } catch (e) {
-    error.value = '加载模板列表失败: ' + (e as Error).message
+    toast.error('加载模板列表失败: ' + (e as Error).message)
   }
 }
 
-/** 激活某模板：读取内容到编辑器（不做本地缓存） */
 /** 当前是否有未保存的修改 */
 function isDirty(): boolean {
   return currentUuid.value !== null && getValue() !== savedContent.value
 }
 
-/** 打开/切换到某模板（不做本地缓存）；有未保存修改时先弹确认 */
+/** 下拉选择模板；有未保存修改时先弹确认 */
+function onSelectChange(): void {
+  void activate(curSel.value)
+}
+
+/** 打开/切换到某模板；有未保存修改时先弹确认 */
 async function activate(uuid: string): Promise<void> {
   if (currentUuid.value === uuid && getValue() !== '') return
   if (currentUuid.value !== null && isDirty()) {
@@ -77,13 +74,13 @@ async function activate(uuid: string): Promise<void> {
 
 async function doActivate(uuid: string): Promise<void> {
   currentUuid.value = uuid
+  curSel.value = uuid
   try {
     const data = await api<unknown>(`/api/templates/${uuid}`)
     setValue(JSON.stringify(data, null, 2))
     savedContent.value = getValue()
-    error.value = ''
   } catch (e) {
-    error.value = '加载失败: ' + (e as Error).message
+    toast.error('加载失败: ' + (e as Error).message)
   }
 }
 
@@ -101,6 +98,7 @@ async function confirmSwitchWithSave(): Promise<void> {
 function cancelSwitch(): void {
   showUnsaved.value = false
   pendingUuid.value = null
+  curSel.value = currentUuid.value ?? ''
 }
 
 /** 打开历史版本弹框 */
@@ -115,7 +113,7 @@ async function openVersions(): Promise<void> {
     }))
     showVersions.value = true
   } catch (e) {
-    error.value = '加载版本失败: ' + (e as Error).message
+    toast.error('加载版本失败: ' + (e as Error).message)
   }
 }
 
@@ -145,11 +143,11 @@ async function doRestore(version: string, saveFirst: boolean): Promise<void> {
     showRestoreConfirm.value = false
     restoreVer.value = ''
     showVersions.value = false
-    flashNotice('已还原为' + (VERSION_LABELS[version] ?? version))
+    toast.info('已还原为' + (VERSION_LABELS[version] ?? version))
     // 编辑器重载为还原后的内容
     await doActivate(currentUuid.value)
   } catch (e) {
-    error.value = '还原失败: ' + (e as Error).message
+    toast.error('还原失败: ' + (e as Error).message)
   }
 }
 
@@ -163,7 +161,6 @@ function confirmRestoreDiscard(): void {
 
 /** 打开新建弹框 */
 function openCreate(): void {
-  createError.value = ''
   createFrom.value = BUILTIN
   createName.value = ''
   showCreate.value = true
@@ -173,11 +170,11 @@ function openCreate(): void {
 async function submitCreate(): Promise<void> {
   const name = createName.value.trim()
   if (!name) {
-    createError.value = '请输入模板名称'
+    toast.warn('请输入模板名称')
     return
   }
   if (templates.value.some((t) => t.name === name)) {
-    createError.value = `已存在同名模板“${name}”`
+    toast.warn(`已存在同名模板“${name}”`)
     return
   }
   try {
@@ -188,15 +185,15 @@ async function submitCreate(): Promise<void> {
     await loadList()
     await activate(created.uuid)
     showCreate.value = false
-    flashNotice('已创建')
+    toast.info('已创建')
   } catch (e) {
-    createError.value = '新建失败: ' + (e as Error).message
+    toast.error('新建失败: ' + (e as Error).message)
   }
 }
 
 async function saveTemplate(): Promise<boolean> {
   if (!currentUuid.value) {
-    error.value = '请先选择模板'
+    toast.warn('请先选择模板')
     return false
   }
   try {
@@ -207,10 +204,10 @@ async function saveTemplate(): Promise<boolean> {
       body: getValue(),
     })
     savedContent.value = getValue()
-    flashNotice('已保存')
+    toast.info('已保存')
     return true
   } catch (e) {
-    error.value = '保存失败: ' + (e as Error).message
+    toast.error('保存失败: ' + (e as Error).message)
     return false
   }
 }
@@ -219,9 +216,9 @@ function formatTemplate(): void {
   try {
     JSON.parse(getValue())
     format()
-    flashNotice('已格式化')
-  } catch (e) {
-    error.value = '格式化失败（JSON 不合法）: ' + (e as Error).message
+    toast.info('已格式化')
+  } catch {
+    toast.error('格式化失败（JSON 不合法）')
   }
 }
 
@@ -230,9 +227,9 @@ async function setCurrentDefault(): Promise<void> {
   try {
     await api(`/api/templates/${currentUuid.value}/default`, { method: 'POST' })
     await loadList()
-    flashNotice('已设为默认')
+    toast.info('已设为默认')
   } catch (e) {
-    error.value = '设置失败: ' + (e as Error).message
+    toast.error('设置失败: ' + (e as Error).message)
   }
 }
 
@@ -240,25 +237,27 @@ async function removeCurrent(): Promise<void> {
   const t = currentInfo()
   if (!t || !currentUuid.value) return
   if (t.default) {
-    error.value = '默认模板不可删除'
+    toast.warn('默认模板不可删除')
     return
   }
   if (!confirm(`删除模板 ${t.name}？`)) return
   try {
     await api(`/api/templates/${t.uuid}`, { method: 'DELETE' })
-    // 当前模板已被删除，编辑内容随之作废，清空脏状态后自动切到默认/第一个模板
+    // 当前模板已被删除，编辑内容随之作废，自动切到默认/第一个模板
     showUnsaved.value = false
     pendingUuid.value = null
     await loadList()
     if (currentUuid.value === t.uuid) {
       currentUuid.value = null
+      curSel.value = ''
       setValue('')
       savedContent.value = ''
     }
     const def = templates.value.find((x) => x.default) ?? templates.value[0]
     if (def) await doActivate(def.uuid)
+    toast.info('已删除')
   } catch (e) {
-    error.value = '删除失败: ' + (e as Error).message
+    toast.error('删除失败: ' + (e as Error).message)
   }
 }
 
@@ -272,88 +271,64 @@ onMounted(async () => {
 <template>
   <main>
     <div class="page">
-      <!-- 顶栏：固定工具按钮 + 可横向滚动的 tab 列表 -->
-      <div class="tab-bar">
-        <div class="tab-actions">
-          <button class="tab-new" title="模板约定" @click="showHelp = true">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-              <line x1="12" y1="17" x2="12.01" y2="17" />
-            </svg>
-          </button>
-          <button class="tab-new" title="新建模板" @click="openCreate">
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
-            </svg>
-          </button>
-        </div>
-        <div class="tabs">
-          <div
-            v-for="t in templates"
-            :key="t.uuid"
-            class="tab"
-            :class="{ active: t.uuid === currentUuid }"
-            :title="t.default ? '默认模板' : ''"
-            @click="activate(t.uuid)"
-          >
-            <span class="tab-name">
-              <PinIcon v-if="t.default" class="pin-mark" />
-              <span class="tab-text">{{ t.name }}</span>
-            </span>
-          </div>
-        </div>
-      </div>
-
+      <!-- 顶栏：左添加 + 中模板下拉 + 右操作按钮（移动端操作组换行） -->
       <div class="toolbar">
-        <span class="cur-name">{{ currentInfo()?.name || '' }}</span>
-        <button id="save" class="btn-save" @click="saveTemplate">保存</button>
-        <button id="format" @click="formatTemplate">格式化</button>
-        <template v-if="currentInfo()">
-          <button id="versions" @click="openVersions">版本</button>
-          <button v-if="!currentInfo()!.default" id="set-default" @click="setCurrentDefault">设为默认</button>
-          <button v-if="!currentInfo()!.default" id="del-tpl" @click="removeCurrent">删除</button>
-        </template>
-        <span class="ok" v-if="notice">{{ notice }}</span>
-        <span class="error" v-else-if="error">{{ error }}</span>
+        <Btn variant="primary" @click="openCreate">+ 添加</Btn>
+
+        <Select
+          v-model="curSel"
+          class="tpl-select"
+          placeholder="暂无模板，请先添加"
+          :disabled="templates.length === 0"
+          @change="onSelectChange"
+        >
+          <option v-for="t in templates" :key="t.uuid" :value="t.uuid">
+            {{ t.default ? '默认 ' : '' }}{{ t.name }}
+          </option>
+        </Select>
+
+        <div class="tpl-actions">
+          <template v-if="currentInfo()">
+            <Btn v-if="!currentInfo()!.default" @click="setCurrentDefault">设为默认</Btn>
+            <Btn variant="primary" @click="saveTemplate">保存</Btn>
+            <Btn @click="formatTemplate">格式化</Btn>
+            <Btn variant="danger" :disabled="currentInfo()!.default" @click="removeCurrent">删除</Btn>
+            <Btn @click="openVersions">版本</Btn>
+          </template>
+          <Btn @click="showHelp = true">说明</Btn>
+        </div>
       </div>
 
       <div class="editor-area">
         <div ref="editorEl" id="editor"></div>
         <div v-if="templates.length === 0 && !currentUuid" class="empty-mask">
           <p class="empty-title">暂无模板</p>
-          <p class="empty-tip">点击上方 “+ 新建”，从内置默认模板创建一个用户模板后再编辑。</p>
+          <p class="empty-tip">点击左侧 “+ 添加”，从内置默认模板创建一个用户模板后再编辑。</p>
         </div>
       </div>
     </div>
 
     <!-- 新建模板 -->
     <Modal v-if="showCreate" title="新建模板" @close="showCreate = false">
-      <p v-if="createError" class="error modal-error">{{ createError }}</p>
-      <div class="field">
-        <label>基于</label>
-        <select v-model="createFrom">
+      <Field label="基于">
+        <Select v-model="createFrom">
           <option value="builtin">内置默认模板</option>
           <option v-for="t in templates" :key="t.uuid" :value="t.uuid">
             {{ t.name }}{{ t.default ? '（默认）' : '' }}
           </option>
-        </select>
-      </div>
-      <div class="field">
-        <label>模板名称</label>
-        <input v-model="createName" type="text" placeholder="输入新模板名称" @keyup.enter="submitCreate" />
-      </div>
+        </Select>
+      </Field>
+      <Field label="模板名称">
+        <input
+          v-model="createName"
+          type="text"
+          placeholder="输入新模板名称"
+          @keyup.enter="submitCreate"
+        />
+      </Field>
       <div class="form-actions">
-        <button id="create-confirm" @click="submitCreate">创建</button>
-        <button class="btn-cancel" @click="showCreate = false">取消</button>
+        <Btn variant="primary" @click="submitCreate">创建</Btn>
+        <Btn @click="showCreate = false">取消</Btn>
       </div>
     </Modal>
 
@@ -361,8 +336,8 @@ onMounted(async () => {
     <Modal v-if="showUnsaved" title="未保存的修改" @close="cancelSwitch">
       <p class="modal-tip">当前模板有未保存的修改，是否先保存再切换？</p>
       <div class="form-actions">
-        <button id="save-switch" @click="confirmSwitchWithSave">保存</button>
-        <button class="btn-cancel" @click="cancelSwitch">取消</button>
+        <Btn variant="primary" @click="confirmSwitchWithSave">保存</Btn>
+        <Btn @click="cancelSwitch">取消</Btn>
       </div>
     </Modal>
 
@@ -379,9 +354,9 @@ onMounted(async () => {
       <p class="modal-tip">当前模板有未保存的修改，请选择处理方式：</p>
       <p class="modal-sub">提示：选择“保存并还原”后，当前编辑会保存为“上次版本”，之后仍可还原回来。</p>
       <div class="form-actions">
-        <button id="restore-save" @click="confirmRestoreSave">保存并还原</button>
-        <button id="restore-discard" @click="confirmRestoreDiscard">丢弃并还原</button>
-        <button class="btn-cancel" @click="cancelRestoreConfirm">取消</button>
+        <Btn variant="primary" @click="confirmRestoreSave">保存并还原</Btn>
+        <Btn variant="danger" @click="confirmRestoreDiscard">丢弃并还原</Btn>
+        <Btn @click="cancelRestoreConfirm">取消</Btn>
       </div>
     </Modal>
 
@@ -411,7 +386,7 @@ main {
   justify-content: center;
   overflow: hidden;
 }
-/* 内容居中（与其它页面一致），页面自身填满高度，编辑器不随页面滚动 */
+/* 页面占满骨架高度，编辑器不随页面滚动 */
 .page {
   width: min(80%, 1200px);
   height: 100%;
@@ -432,141 +407,30 @@ main {
     padding: 0.6rem 0.6rem 0.8rem;
   }
 }
-/* tab 栏容器：左侧固定工具按钮 + 右侧可滚动 tab 列表，共享底部边框 */
-.tab-bar {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.25rem;
-  border-bottom: 1px solid var(--surface-3);
-  flex-shrink: 0;
-}
-.tab-actions {
-  display: flex;
-  align-items: flex-end;
-  flex-shrink: 0;
-}
-button {
-  border: none;
-  border-radius: var(--radius-2);
-  cursor: pointer;
-  transition: filter var(--ease-3) 0.15s;
-}
-button:hover {
-  filter: brightness(0.92);
-}
-.tabs {
-  display: flex;
-  align-items: flex-end;
-  overflow-x: auto;
-  overflow-y: hidden;
-  flex: 1;
-  min-width: 0;
-  /* 隐藏横向滚动条（多 tab 时仍可横向滚动） */
-  scrollbar-width: none;
-}
-.tabs::-webkit-scrollbar {
-  display: none;
-}
-.tab-new {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 1.7rem;
-  height: 1.7rem;
-  margin: 0 0.2rem 0.15rem 0;
-  padding: 0;
-  background: none;
-  color: var(--text-2);
-  border-radius: var(--radius-1);
-}
-.tab-new:hover {
-  background: var(--surface-3);
-  color: var(--text-1);
-}
-.tab-new svg {
-  width: 1rem;
-  height: 1rem;
-}
-.tab {
-  display: flex;
-  align-items: center;
-  padding: 0.4rem 0.8rem;
-  font-size: 0.85rem;
-  color: var(--text-2);
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: var(--radius-2) var(--radius-2) 0 0;
-  cursor: pointer;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-.tab:hover {
-  background: var(--surface-3);
-}
-.tab.active {
-  background: var(--surface-2);
-  border-color: var(--surface-3);
-  color: var(--text-1);
-  position: relative;
-  top: 1px;
-}
-.tab-name {
-  display: inline-flex;
-  align-items: center;
-  max-width: 160px;
-}
-.tab-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pin-mark {
-  margin-right: 0.25rem;
-  flex-shrink: 0;
-}
+/* 顶栏：添加 + 模板下拉 + 操作按钮（同行等尺寸；移动端操作组换行） */
 .toolbar {
   display: flex;
-  gap: 0.5rem;
   align-items: center;
-  padding: 0.4rem 0;
+  gap: 0.5rem;
+  padding: 0.1rem 0 0.55rem;
   flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.tpl-select {
+  flex: 1;
+  min-width: 0;
+}
+.tpl-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 @media (max-width: 767px) {
-  .toolbar {
-    flex-wrap: wrap;
-    row-gap: 0.35rem;
+  .tpl-actions {
+    flex-basis: 100%;
+    row-gap: 0.5rem;
   }
-  .toolbar .cur-name {
-    width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
-.toolbar .cur-name {
-  font-size: 0.9rem;
-  color: var(--text-1);
-  font-weight: var(--font-weight-6);
-  margin-right: auto;
-}
-.toolbar button {
-  padding: 0.35rem 0.8rem;
-  background: var(--surface-3);
-  color: var(--text-1);
-  font-size: 0.9rem;
-}
-.toolbar .btn-save {
-  background: var(--green-7);
-  color: #fff;
-}
-#set-default {
-  background: var(--indigo-7);
-  color: #fff;
-}
-#del-tpl {
-  background: var(--red-7);
-  color: #fff;
 }
 .editor-area {
   flex: 1;
@@ -576,8 +440,8 @@ button:hover {
 #editor {
   position: absolute;
   inset: 0;
-  border: 1px solid var(--surface-3);
-  border-radius: var(--radius-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 .empty-mask {
@@ -589,56 +453,36 @@ button:hover {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  background: var(--surface-2);
-  border: 1px dashed var(--surface-4);
-  border-radius: var(--radius-2);
+  background: var(--bg);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
 }
 .empty-title {
-  font-size: 1rem;
-  font-weight: var(--font-weight-7);
-  color: var(--text-2);
   margin: 0;
+  font-size: 1rem;
+  font-weight: var(--font-weight-6);
+  color: var(--text-secondary);
 }
 .empty-tip {
-  font-size: 0.85rem;
-  color: var(--text-2);
   margin: 0;
-}
-.field {
-  display: flex;
-  flex-direction: column;
-  margin-bottom: 0.8rem;
-}
-label {
   font-size: 0.85rem;
-  margin-bottom: 4px;
-  color: var(--text-2);
-}
-select,
-input {
-  padding: 0.45rem;
-  border: 1px solid var(--surface-3);
-  border-radius: var(--radius-2);
-  font-size: 0.9rem;
-  background: var(--surface-1);
-  color: var(--text-1);
-  width: 100%;
-  box-sizing: border-box;
+  color: var(--text-faint);
 }
 .form-actions {
   display: flex;
   gap: 0.5rem;
   margin-top: 1rem;
+  flex-wrap: wrap;
 }
-#create-confirm {
-  background: var(--brand);
-  color: #fff;
-  padding: 0.5rem 1rem;
+.modal-sub {
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
 }
-.form-actions .btn-cancel {
-  background: var(--surface-3);
-  color: var(--text-1);
-  padding: 0.5rem 1rem;
+.modal-tip {
+  margin: 0 0 0.4rem;
+  font-size: 0.9rem;
+  color: var(--text);
 }
 .help-list {
   margin: 0;
@@ -653,53 +497,10 @@ input {
   padding-left: 1.2rem;
 }
 .help-list code {
-  background: var(--surface-3);
   padding: 0 4px;
-  border-radius: 4px;
-  font-family: var(--font-monospace-code);
+  font-family: var(--font-mono);
   font-size: 0.85rem;
-}
-#save-switch {
-  background: var(--green-7);
-  color: #fff;
-  padding: 0.5rem 1rem;
-}
-#restore-save {
-  background: var(--green-7);
-  color: #fff;
-  padding: 0.5rem 1rem;
-}
-#restore-discard {
-  background: var(--red-7);
-  color: #fff;
-  padding: 0.5rem 1rem;
-}
-.form-actions .btn-cancel {
-  padding: 0.5rem 1rem;
-}
-.modal-sub {
-  margin: 0 0 0.6rem;
-  font-size: 0.85rem;
-  color: var(--text-2);
-}
-.error {
-  color: var(--red-7);
-  margin-left: 0.5rem;
-  white-space: pre-wrap;
-  font-size: 0.85rem;
-}
-.modal-error {
-  margin: 0 0 0.6rem;
-  font-size: 0.85rem;
-}
-.modal-tip {
-  margin: 0 0 0.4rem;
-  font-size: 0.9rem;
-  color: var(--text-1);
-}
-.ok {
-  color: var(--green-7);
-  margin-left: 0.5rem;
-  font-size: 0.85rem;
+  background: var(--neutral-soft);
+  border-radius: var(--radius-sm);
 }
 </style>

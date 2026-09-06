@@ -96,11 +96,8 @@ const cls = computed(() => [`btn-${props.variant}`, `btn-${props.size}`, { 'btn-
   background: var(--accent-strong);
 }
 
-/* danger：危险操作，红字 */
+/* danger：与普通按钮同构（白底细边阴影），文字红色；hover 淡红底 */
 .btn-danger {
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
   color: var(--danger);
 }
 .btn-danger:hover {
