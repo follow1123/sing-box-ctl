@@ -1,21 +1,30 @@
 <script setup lang="ts">
+import { ref, computed } from 'vue'
 import Header from './components/Header.vue'
-import ProviderView from './views/ProviderView.vue'
 import ToastHost from './components/ui/ToastHost.vue'
+import ProviderView from './views/ProviderView.vue'
+import TemplateView from './views/TemplateView.vue'
+import UrlView from './views/UrlView.vue'
 
-// 应用骨架：header 固定，main 为唯一滚动区。当前先展示 Provider 列表页，
-// 其余页面后续逐个接入。
+// 简单 hash 路由（三个页面）
+const route = ref(window.location.hash.slice(1) || '/')
+window.addEventListener('hashchange', () => {
+  route.value = window.location.hash.slice(1) || '/'
+})
+const page = computed(() => route.value)
 </script>
 
 <template>
   <div class="app">
     <header class="app-header">
-      <Header />
+      <Header :active="page" />
     </header>
 
     <!-- 内容滚动区：所有页面共用，内容过长时滚动条贴窗口最右 -->
     <main class="app-main">
-      <ProviderView />
+      <ProviderView v-if="page === '/'" />
+      <TemplateView v-else-if="page === '/templates'" />
+      <UrlView v-else />
     </main>
 
     <!-- 全局通知：右下角最多 3 条 -->

@@ -257,3 +257,24 @@ textarea {
     height: auto;
   }
 }
+
+/* ==========================================================================
+   页面通用工具类（各页复用，避免在 SFC 里重复写）
+   ========================================================================== */
+
+/* 页面大标题（serif，Provider/URL 等页共用） */
+.page-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 1.45rem;
+  font-weight: var(--font-weight-6);
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+/* 标题 + 右侧操作行（Provider 页 header） */
+.page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.1rem;
+}

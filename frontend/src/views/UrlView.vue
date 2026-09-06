@@ -1,21 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import ContentPage from '../components/ContentPage.vue'
+import Btn from '../components/ui/Btn.vue'
+import Card from '../components/ui/Card.vue'
+import Field from '../components/ui/Field.vue'
+import Select from '../components/ui/Select.vue'
 import { api } from '../composables/useApi'
+import { toast } from '../composables/useToast'
 import type { ProviderConfig, TemplateInfo } from '../types'
 
 const providers = ref<ProviderConfig[]>([])
 const templates = ref<TemplateInfo[]>([])
-const error = ref('')
-const notice = ref('')
-let noticeTimer: ReturnType<typeof setTimeout> | undefined
-
-function flashNotice(msg: string): void {
-  error.value = ''
-  notice.value = msg
-  if (noticeTimer) clearTimeout(noticeTimer)
-  noticeTimer = setTimeout(() => (notice.value = ''), 2000)
-}
 
 const providerUuid = ref('')
 const templateUuid = ref('')
@@ -83,7 +78,7 @@ function importFromUrl(raw: string): void {
     const u = new URL(raw, location.origin)
     const m = u.pathname.match(/\/config\/([^/]+)/)
     if (!m) {
-      error.value = 'URL 格式不正确，应包含 /config/<provider-uuid>'
+      toast.warn('URL 格式不正确，应包含 /config/<provider-uuid>')
       return
     }
     providerUuid.value = m[1]
@@ -101,9 +96,9 @@ function importFromUrl(raw: string): void {
     apiPort.value = q.get('api-port') || ''
     apiSecret.value = q.get('api-secret') || ''
     syncPlatformState()
-    notice.value = '已导入'
+    toast.info('已导入')
   } catch (e) {
-    error.value = '导入失败: ' + (e as Error).message
+    toast.error('导入失败: ' + (e as Error).message)
   }
 }
 
@@ -192,30 +187,19 @@ async function applyTemplateDefaults(): Promise<void> {
     // 为默认勾选的模式填入模板默认值
     if (mixed.value) fillMixedFromTemplate()
   } catch (e) {
-    error.value = '加载模板默认配置失败: ' + (e as Error).message
+    toast.error('加载模板默认配置失败: ' + (e as Error).message)
   }
 }
 
 async function copyUrl(): Promise<void> {
-  if (!providerUuid.value) {
-    error.value = '请先选择 provider'
-    return
-  }
-  if (templates.value.length === 0) {
-    error.value = '暂无模板，请先在模板管理页新建模板'
-    return
-  }
-  if (!tun.value && !mixed.value && !hasOtherInbound.value) {
-    error.value = '需要至少启用 Tun 或 Mixed 一种模式'
-    return
-  }
-  if (platform.value === 'android' && !hasTun.value) {
-    error.value = '当前模板没有 Tun inbound，Android 无法使用'
+  const check = checkReady()
+  if (!check.ok) {
+    toast.warn(check.msg)
     return
   }
   try {
     await navigator.clipboard.writeText(url.value)
-    flashNotice('已复制到剪贴板')
+    toast.info('已复制到剪贴板')
   } catch {
     // 旧浏览器降级
     const ta = document.createElement('textarea')
@@ -224,29 +208,31 @@ async function copyUrl(): Promise<void> {
     ta.select()
     const ok = document.execCommand('copy')
     document.body.removeChild(ta)
-    if (ok) flashNotice('已复制到剪贴板')
-    else error.value = '复制失败，请手动选择复制'
+    if (ok) toast.info('已复制到剪贴板')
+    else toast.warn('复制失败，请手动复制')
   }
 }
 
 function openUrl(): void {
-  if (!providerUuid.value) {
-    error.value = '请先选择 provider'
-    return
-  }
-  if (templates.value.length === 0) {
-    error.value = '暂无模板，请先在模板管理页新建模板'
-    return
-  }
-  if (!tun.value && !mixed.value && !hasOtherInbound.value) {
-    error.value = '需要至少启用 Tun 或 Mixed 一种模式'
-    return
-  }
-  if (platform.value === 'android' && !hasTun.value) {
-    error.value = '当前模板没有 Tun inbound，Android 无法使用'
+  const check = checkReady()
+  if (!check.ok) {
+    toast.warn(check.msg)
     return
   }
   window.open(url.value, '_blank')
+}
+
+/** 生成/打开前的一致性检查 */
+function checkReady(): { ok: boolean; msg: string } {
+  if (!providerUuid.value) return { ok: false, msg: '请先选择 provider' }
+  if (templates.value.length === 0) return { ok: false, msg: '暂无模板，请先在模板管理页新建模板' }
+  if (!tun.value && !mixed.value && !hasOtherInbound.value) {
+    return { ok: false, msg: '需要至少启用 Tun 或 Mixed 一种模式' }
+  }
+  if (platform.value === 'android' && !hasTun.value) {
+    return { ok: false, msg: '当前模板没有 Tun inbound，Android 无法使用' }
+  }
+  return { ok: true, msg: '' }
 }
 
 onMounted(async () => {
@@ -262,122 +248,97 @@ onMounted(async () => {
     // 初始回填默认模板配置
     await applyTemplateDefaults()
   } catch (e) {
-    error.value = '加载数据失败: ' + (e as Error).message
+    toast.error('加载数据失败: ' + (e as Error).message)
   }
 })
 </script>
 
 <template>
   <ContentPage>
-    <h1>生成配置 URL</h1>
+    <h1 class="page-title">生成配置 URL</h1>
 
     <!-- 区域1：按钮功能区 -->
     <div class="top-bar">
-      <button class="btn-import" @click="promptImport">导入</button>
+      <Btn @click="promptImport">导入</Btn>
       <div class="top-actions">
-        <button id="copyBtn" @click="copyUrl">复制 URL</button>
-        <button id="openBtn" @click="openUrl">打开</button>
+        <Btn variant="primary" @click="copyUrl">复制 URL</Btn>
+        <Btn @click="openUrl">打开</Btn>
       </div>
     </div>
 
-    <!-- 区域2：URL 预览 + 提示 -->
-    <div class="card preview-card">
-      <div class="card-title">URL 预览</div>
-      <textarea
-        id="url-box"
-        readonly
-        rows="3"
-        :value="url || '请选择 Provider 以生成 URL'"
-      ></textarea>
-      <p v-if="error" class="error">{{ error }}</p>
-      <p v-else-if="notice" class="ok">{{ notice }}</p>
-    </div>
+    <!-- 区域2：URL 预览 -->
+    <Card class="preview-card" title="URL 预览">
+      <textarea id="url-box" readonly rows="3" :value="url || '请选择 Provider 以生成 URL'"></textarea>
+    </Card>
 
     <!-- 区域3：选择元数据 -->
     <h2 class="section-label">选择 Provider 与模板</h2>
     <div class="select-grid">
-      <div class="card">
-        <div class="card-title">Provider</div>
-        <select v-model="providerUuid">
-          <option value="">-- 选择 provider --</option>
+      <Card title="Provider">
+        <Select v-model="providerUuid" placeholder="-- 选择 provider --">
           <option v-for="p in providers" :key="p.uuid" :value="p.uuid">{{ p.name }}</option>
-        </select>
-      </div>
-      <div class="card">
-        <div class="card-title">模板</div>
-        <select v-model="templateUuid" @change="applyTemplateDefaults">
+        </Select>
+      </Card>
+      <Card title="模板">
+        <Select v-model="templateUuid" @change="applyTemplateDefaults">
           <option v-if="templates.length === 0" value="" disabled>暂无模板，请先在模板页新建</option>
           <option v-for="t in templates" :key="t.uuid" :value="t.uuid">
             {{ t.name }}{{ t.default ? '（默认）' : '' }}
           </option>
-        </select>
-      </div>
+        </Select>
+      </Card>
     </div>
 
     <!-- 区域4：配置开关 -->
     <h2 class="section-label">模式与功能开关</h2>
     <div class="option-grid">
-      <div class="card">
-        <div class="card-title">Platform</div>
-        <select v-model="platform" @change="onPlatformChange">
+      <Card title="Platform">
+        <Select v-model="platform" @change="onPlatformChange">
           <option value="windows">Windows</option>
           <option value="linux">Linux</option>
           <option value="android">Android</option>
-        </select>
+        </Select>
         <p v-if="platform === 'android'" class="platform-hint">Android 必须使用 Tun 模式，Tun 开关已强制开启。</p>
-      </div>
+      </Card>
 
-      <div class="card">
-        <div class="card-title">Tun 模式</div>
+      <Card title="Tun 模式">
         <label class="check-row"><input v-model="tun" type="checkbox" :disabled="tunDisabled" /> 启用 Tun</label>
-      </div>
+      </Card>
 
-      <div class="card">
-        <div class="card-title">Mixed 模式</div>
+      <Card title="Mixed 模式">
         <label class="check-row"><input v-model="mixed" type="checkbox" @change="onMixedChange" /> 启用 Mixed</label>
         <div v-if="mixed" class="sub-fields">
-          <div class="field">
-            <div class="field-title">监听地址</div>
+          <Field label="监听地址">
             <input v-model="mixedListen" type="text" placeholder="127.0.0.1" />
-          </div>
-          <div class="field">
-            <div class="field-title">端口</div>
+          </Field>
+          <Field label="端口">
             <input v-model="mixedPort" type="number" placeholder="7899" />
-          </div>
+          </Field>
           <label class="check-row"><input v-model="sysProxy" type="checkbox" /> 系统代理</label>
         </div>
-      </div>
+      </Card>
 
-      <div class="card">
-        <div class="card-title">Sing-box API</div>
+      <Card title="Sing-box API">
         <p class="card-sub">gRPC 服务（默认禁用），供 sing-box 官方客户端与 Dashboard 远程查看和控制本实例。</p>
         <label class="check-row"><input v-model="apiEnabled" type="checkbox" @change="onApiChange" /> 启用 Sing-box API</label>
         <div v-if="apiEnabled" class="sub-fields">
           <label class="check-row"><input v-model="apiDashboard" type="checkbox" /> 启用 Dashboard（Web 面板）</label>
-          <div class="field">
-            <div class="field-title">监听地址</div>
+          <Field label="监听地址">
             <input v-model="apiListen" type="text" placeholder="127.0.0.1" />
-          </div>
-          <div class="field">
-            <div class="field-title">端口</div>
+          </Field>
+          <Field label="端口">
             <input v-model="apiPort" type="number" placeholder="9090" />
-          </div>
-          <div class="field">
-            <div class="field-title">Secret（可选）</div>
+          </Field>
+          <Field label="Secret（可选）">
             <input v-model="apiSecret" type="text" placeholder="留空则不设置" />
-          </div>
+          </Field>
         </div>
-      </div>
+      </Card>
     </div>
   </ContentPage>
 </template>
 
 <style scoped>
-h1 {
-  font-size: 1.2rem;
-  margin: 0 0 1rem;
-  color: var(--text-1);
-}
 .top-bar {
   display: flex;
   justify-content: space-between;
@@ -387,64 +348,12 @@ h1 {
 }
 .top-actions {
   display: flex;
-  gap: 0.6rem;
-}
-button {
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: var(--radius-2);
-  background: var(--surface-3);
-  color: var(--text-1);
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: filter var(--ease-3) 0.15s;
-}
-button:hover {
-  filter: brightness(0.92);
-}
-.btn-import {
-  background: var(--surface-3);
-}
-#copyBtn {
-  background: var(--green-7);
-  color: #fff;
-}
-#openBtn {
-  background: var(--brand);
-  color: #fff;
-}
-.card {
-  background: var(--surface-2);
-  border: 1px solid var(--surface-3);
-  border-radius: var(--radius-2);
-  padding: 1rem;
-}
-.card-title {
-  font-weight: var(--font-weight-6);
-  font-size: 0.95rem;
-  color: var(--text-1);
-  margin-bottom: 0.6rem;
-}
-/* 分区小标题：文字 + 右侧延伸分隔线 */
-.section-label {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  font-size: 1rem;
-  font-weight: var(--font-weight-7);
-  color: var(--text-1);
-  margin: 1.8rem 0 1rem;
-}
-.section-label::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--surface-3);
+  gap: 0.5rem;
 }
 .card-sub {
-  font-size: 0.8rem;
-  color: var(--text-2);
-  margin: -0.2rem 0 0.6rem;
+  margin: 0 0 0.6rem;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
 }
 .preview-card {
   margin-bottom: 1rem;
@@ -452,13 +361,13 @@ button:hover {
 #url-box {
   width: 100%;
   box-sizing: border-box;
-  padding: 0.6rem;
-  border: 1px solid var(--surface-3);
-  border-radius: var(--radius-2);
-  font-family: var(--font-monospace-code);
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  font-family: var(--font-mono);
   font-size: 0.85rem;
-  background: var(--surface-1);
-  color: var(--text-1);
+  background: var(--bg);
+  color: var(--text);
   resize: vertical;
   word-break: break-all;
   white-space: pre-wrap;
@@ -479,58 +388,43 @@ button:hover {
     grid-template-columns: 1fr;
   }
 }
-select,
-input {
-  padding: 0.45rem;
-  border: 1px solid var(--surface-3);
-  border-radius: var(--radius-2);
-  font-size: 0.9rem;
-  background: var(--surface-1);
-  color: var(--text-1);
-  width: 100%;
-  box-sizing: border-box;
-}
 .check-row {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 4px 0;
-  color: var(--text-1);
+  color: var(--text);
   cursor: pointer;
 }
 .check-row input[type='checkbox'] {
   width: auto;
+  height: auto;
+  padding: 0;
+  box-shadow: none;
 }
 .sub-fields {
-  border-left: 3px solid var(--surface-4);
+  border-left: 3px solid var(--border-strong);
   padding-left: 12px;
-  margin-top: 6px;
-}
-.field {
-  display: flex;
-  flex-direction: column;
-  margin-bottom: 0.6rem;
-}
-.field-title {
-  font-weight: var(--font-weight-5);
-  margin-bottom: 4px;
-  font-size: 0.85rem;
-  color: var(--text-2);
+  margin-top: 4px;
 }
 .platform-hint {
-  font-size: 0.8rem;
-  color: var(--orange-9);
   margin: 0.7rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--medium);
 }
-.error {
-  color: var(--red-7);
-  margin: 0.6rem 0 0;
-  font-size: 0.9rem;
-  white-space: pre-wrap;
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 1.8rem 0 1rem;
+  font-size: 1rem;
+  font-weight: var(--font-weight-6);
+  color: var(--text);
 }
-.ok {
-  color: var(--green-7);
-  margin: 0.6rem 0 0;
-  font-size: 0.9rem;
+.section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
 }
 </style>

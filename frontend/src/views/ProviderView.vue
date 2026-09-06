@@ -186,8 +186,8 @@ onMounted(load)
 
 <template>
   <ContentPage>
-    <div class="page-header">
-      <h1>Provider 管理</h1>
+    <div class="page-head">
+      <h1 class="page-title">Provider 管理</h1>
       <Btn variant="primary" @click="openCreate">+ 添加</Btn>
     </div>
 
@@ -252,21 +252,6 @@ onMounted(load)
 </template>
 
 <style scoped>
-/* ========== Provider 页（ProviderView） ========== */
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.1rem;
-}
-h1 {
-  margin: 0;
-  font-family: var(--font-serif);
-  font-size: 1.45rem;
-  font-weight: var(--font-weight-6);
-  letter-spacing: -0.02em;
-  color: var(--text);
-}
 .empty-tip {
   margin: 0.4rem 0;
   font-size: 0.9rem;
