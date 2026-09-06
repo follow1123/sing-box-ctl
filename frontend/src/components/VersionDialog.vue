@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import Modal from './Modal.vue'
+import Btn from './ui/Btn.vue'
 
 export interface VersionItem {
   version: string
@@ -19,7 +20,7 @@ const emit = defineEmits<{ (e: 'close'): void; (e: 'restore', version: string): 
         <span class="name" :class="{ muted: it.isCurrent }">{{ it.label }}</span>
         <div class="ops">
           <span v-if="it.isCurrent" class="cur-tag">当前</span>
-          <button v-else class="restore" @click="emit('restore', it.version)">还原</button>
+          <Btn v-else size="sm" @click="emit('restore', it.version)">还原</Btn>
         </div>
       </div>
     </div>
@@ -30,7 +31,7 @@ const emit = defineEmits<{ (e: 'close'): void; (e: 'restore', version: string): 
 .empty {
   margin: 0;
   font-size: 0.9rem;
-  color: var(--text-2);
+  color: var(--text-faint);
 }
 .rows {
   display: flex;
@@ -40,18 +41,18 @@ const emit = defineEmits<{ (e: 'close'): void; (e: 'restore', version: string): 
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.5rem 0.2rem;
-  border-bottom: 1px solid var(--surface-3);
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--border);
   font-size: 0.9rem;
 }
 .row:last-child {
   border-bottom: none;
 }
 .name {
-  color: var(--text-1);
+  color: var(--text);
 }
 .name.muted {
-  color: var(--text-2);
+  color: var(--text-faint);
 }
 .ops {
   display: flex;
@@ -59,19 +60,10 @@ const emit = defineEmits<{ (e: 'close'): void; (e: 'restore', version: string): 
   gap: 0.5rem;
 }
 .cur-tag {
-  font-size: 0.8rem;
-  color: var(--text-2);
-}
-.restore {
-  padding: 0.3rem 0.8rem;
-  background: var(--brand);
-  color: #fff;
-  font-size: 0.85rem;
-  border: none;
-  border-radius: var(--radius-2);
-  cursor: pointer;
-}
-.restore:hover {
-  filter: brightness(0.92);
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: var(--radius-pill);
 }
 </style>

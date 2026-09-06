@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount } from 'vue'
+import Btn from './ui/Btn.vue'
 
 defineProps<{ title: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -16,7 +17,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     <div class="dialog" role="dialog" aria-modal="true">
       <div class="header">
         <span class="title">{{ title }}</span>
-        <button class="close" type="button" aria-label="关闭" @click="emit('close')">✕</button>
+        <Btn variant="ghost" size="sm" square aria-label="关闭" @click="emit('close')">✕</Btn>
       </div>
       <div class="body">
         <slot />
@@ -29,42 +30,31 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .mask {
   position: fixed;
   inset: 0;
-  background: rgb(0 0 0 / 45%);
   display: flex;
   align-items: center;
   justify-content: center;
+  background: var(--scrim);
   z-index: 100;
 }
 .dialog {
-  width: min(480px, 92vw);
-  max-height: 88vh;
+  width: min(520px, 92vw);
+  max-height: 85vh;
   overflow-y: auto;
-  background: var(--surface-2);
-  border: 1px solid var(--surface-4);
-  border-radius: var(--radius-2);
-  box-shadow: var(--shadow-4);
-  padding: 1rem 1.2rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-overlay);
+  padding: var(--size-5);
 }
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.8rem;
+  margin-bottom: 0.6rem;
 }
 .title {
   font-weight: var(--font-weight-6);
-  color: var(--text-1);
-}
-.close {
-  background: none;
-  border: none;
   font-size: 1rem;
-  cursor: pointer;
-  color: var(--text-2);
-  padding: 2px 6px;
-  border-radius: var(--radius-2);
-}
-.close:hover {
-  background: var(--surface-3);
+  color: var(--text);
 }
 </style>
