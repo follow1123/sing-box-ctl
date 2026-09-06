@@ -1,12 +1,14 @@
 <script setup lang="ts">
-// 应用骨架（开发中）：上方 header 区与下方内容区目前均为占位。
+import Header from './components/Header.vue'
+
+// 应用骨架（开发中）：header 已就位，下方内容区为占位。
 </script>
 
 <template>
   <div class="app">
-    <!-- 上方区域：后续接入 header 组件（当前为占位） -->
+    <!-- 上方区域：header 组件 -->
     <header class="app-header">
-      <p class="placeholder">Header 区域 — 后续接入 header 组件</p>
+      <Header />
     </header>
 
     <!-- 下方内容区：唯一滚动容器，内容过长时滚动条贴窗口最右 -->
@@ -40,7 +42,6 @@
 }
 .app-header {
   flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
 }
 .app-main {
   flex: 1;
@@ -68,9 +69,6 @@
   margin: 0;
   font-size: 0.9rem;
   color: var(--text-secondary);
-}
-.app-header .placeholder {
-  padding: 0.6rem 1.5rem;
 }
 .placeholder.small {
   margin-top: 0.4rem;

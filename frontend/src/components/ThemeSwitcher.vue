@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { theme, setTheme } from '../composables/useTheme'
+import Btn from './ui/Btn.vue'
 
 const order = ['auto', 'light', 'dark'] as const
 
@@ -10,14 +11,22 @@ function cycle(): void {
 </script>
 
 <template>
-  <button class="theme-switch" title="切换主题（自动 / 亮色 / 暗色）" @click="cycle">
-    <!-- 自动：半日半月的简化示意 -->
+  <Btn
+    variant="ghost"
+    size="sm"
+    square
+    title="切换主题（自动 / 亮色 / 暗色）"
+    @click="cycle"
+  >
+    <!-- 自动：左浅右深的明暗分半圆（不依赖背景色，悬停/主题下都自然） -->
     <svg v-if="theme === 'auto'" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M12 2a10 10 0 1 1 0 20V2z" />
+      <path d="M12 2a10 10 0 1 1 0 20A10 10 0 0 1 12 2z" fill-opacity="0.22" />
+      <path d="M12 2a10 10 0 0 1 10 10H12z" />
     </svg>
     <!-- 亮色：太阳 -->
     <svg
       v-else-if="theme === 'light'"
+      class="ti"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -33,6 +42,7 @@ function cycle(): void {
     <!-- 暗色：月亮 -->
     <svg
       v-else
+      class="ti"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -43,30 +53,12 @@ function cycle(): void {
     >
       <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
     </svg>
-  </button>
+  </Btn>
 </template>
 
 <style scoped>
-.theme-switch {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.8rem;
-  height: 1.8rem;
-  margin-left: auto;
-  padding: 0;
-  background: none;
-  border: none;
-  border-radius: var(--radius-1);
-  color: var(--text-2);
-  cursor: pointer;
-}
-.theme-switch:hover {
-  background: var(--surface-3);
-  color: var(--text-1);
-}
-.theme-switch svg {
-  width: 1.05rem;
-  height: 1.05rem;
+.ti {
+  width: 1.1rem;
+  height: 1.1rem;
 }
 </style>
