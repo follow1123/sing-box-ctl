@@ -41,6 +41,7 @@ type Server struct {
 	workingDir string
 	certFile   string
 	keyFile    string
+	pm         *provider.ProviderManager
 	server     *http.Server
 }
 
@@ -63,7 +64,11 @@ func New(opts Options) (*Server, error) {
 	if err := initWorkingDir(absDir); err != nil {
 		return nil, err
 	}
-	s := &Server{workingDir: absDir, certFile: opts.CertFile, keyFile: opts.KeyFile}
+	pm, err := provider.NewManager(absDir)
+	if err != nil {
+		return nil, err
+	}
+	s := &Server{workingDir: absDir, certFile: opts.CertFile, keyFile: opts.KeyFile, pm: pm}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(apiPath, s.providersHandle)
@@ -178,30 +183,89 @@ func decodeProviderRequest(r *http.Request) (*providerRequest, error) {
 }
 
 // GET /api/providers -> 列表
-// POST /api/providers -> 添加
+// POST /api/providers -> multipart 一步创建：上传文件或提供 url，解析出节点成功后才创建
+//
+//	form: name/source/message/url；source=upload 时必须带 file，source=url 时必须带 url
 func (s *Server) providersHandle(w http.ResponseWriter, r *http.Request) {
-	p, err := s.newProvider()
-	if err != nil {
-		handleInternalServerError(w, err)
-		return
-	}
-
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, p.List())
+		writeJSON(w, s.pm.List())
 	case http.MethodPost:
-		req, err := decodeProviderRequest(r)
+		if err := r.ParseMultipartForm(10 << 20); err != nil { // 10MB 上限
+			handleError(w, fmt.Errorf("parse multipart form error:\n\t%w", err), http.StatusBadRequest)
+			return
+		}
+		name := r.FormValue("name")
+		source := r.FormValue("source")
+		message := r.FormValue("message")
+		url := r.FormValue("url")
+		if source == "" {
+			source = provider.SourceURL
+		}
+
+		// 先取内容（上传文件或下载 url）并解析出节点，失败则不落盘
+		var raw []byte
+		var fileName string
+		switch source {
+		case provider.SourceUpload:
+			f, header, err := r.FormFile("file")
+			if err != nil {
+				handleError(w, fmt.Errorf("get file from form error:\n\t%w", err), http.StatusBadRequest)
+				return
+			}
+			defer f.Close()
+			raw, err = io.ReadAll(f)
+			if err != nil {
+				handleError(w, fmt.Errorf("read uploaded file error:\n\t%w", err), http.StatusBadRequest)
+				return
+			}
+			fileName = header.Filename
+		case provider.SourceURL:
+			if url == "" {
+				handleError(w, fmt.Errorf("url is required when source is '%s'", provider.SourceURL), http.StatusBadRequest)
+				return
+			}
+			data, err := provider.DataFromSource(url)
+			if err != nil {
+				handleError(w, err, http.StatusBadGateway)
+				return
+			}
+			raw = data
+		default:
+			handleError(w, fmt.Errorf("invalid source '%s', must be '%s' or '%s'", source, provider.SourceURL, provider.SourceUpload), http.StatusBadRequest)
+			return
+		}
+		nodes, err := converter.NodesFromClash(raw)
 		if err != nil {
 			handleError(w, err, http.StatusBadRequest)
 			return
 		}
-		uuid, err := p.Add(req.Name, req.Url, req.Source, req.Message)
+		nodeJSON, err := json.Marshal(nodes)
+		if err != nil {
+			handleInternalServerError(w, err)
+			return
+		}
+
+		// 解析成功后才创建 provider，避免留下无内容的空壳条目
+		uuid, err := s.pm.Add(name, url, source, message)
 		if err != nil {
 			handleError(w, err, http.StatusBadRequest)
 			return
+		}
+		if err := s.pm.SaveNodes(uuid, nodeJSON); err != nil {
+			s.pm.Delete(uuid)
+			handleInternalServerError(w, err)
+			return
+		}
+		if source == provider.SourceUpload {
+			if err := s.pm.SetFileName(uuid, fileName); err != nil {
+				s.pm.Delete(uuid)
+				handleInternalServerError(w, err)
+				return
+			}
 		}
 		w.WriteHeader(http.StatusCreated)
-		writeJSON(w, p.Get(uuid))
+		writeJSON(w, s.pm.Get(uuid))
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -212,12 +276,6 @@ func (s *Server) providersHandle(w http.ResponseWriter, r *http.Request) {
 // POST /api/providers/<uuid>/fetch -> 下载订阅
 // POST /api/providers/<uuid>/upload -> 上传配置
 func (s *Server) providerHandle(w http.ResponseWriter, r *http.Request) {
-	p, err := s.newProvider()
-	if err != nil {
-		handleInternalServerError(w, err)
-		return
-	}
-
 	rest := strings.TrimPrefix(r.URL.Path, apiPath+"/")
 	parts := strings.Split(rest, "/")
 	if len(parts) < 1 || parts[0] == "" {
@@ -233,38 +291,38 @@ func (s *Server) providerHandle(w http.ResponseWriter, r *http.Request) {
 			handleError(w, err, http.StatusBadRequest)
 			return
 		}
-		if err := p.Update(uuid, req.Name, req.Url, req.Source, req.Message); err != nil {
+		if err := s.pm.Update(uuid, req.Name, req.Url, req.Source, req.Message); err != nil {
 			handleError(w, err, http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, p.Get(uuid))
+		writeJSON(w, s.pm.Get(uuid))
 	case len(parts) == 1 && r.Method == http.MethodDelete:
-		if err := p.Delete(uuid); err != nil {
+		if err := s.pm.Delete(uuid); err != nil {
 			handleInternalServerError(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	case len(parts) == 2 && parts[1] == "fetch" && r.Method == http.MethodPost:
-		s.fetchHandle(w, r, p, uuid)
+		s.fetchHandle(w, r, uuid)
 	case len(parts) == 2 && parts[1] == "upload" && r.Method == http.MethodPost:
-		s.uploadHandle(w, r, p, uuid)
+		s.uploadHandle(w, r, uuid)
 	case len(parts) == 2 && parts[1] == "versions" && r.Method == http.MethodGet:
-		if p.Get(uuid) == nil {
+		if s.pm.Get(uuid) == nil {
 			handleError(w, fmt.Errorf("no provider with uuid: %s", uuid), http.StatusNotFound)
 			return
 		}
-		vers, err := p.SubscriptionVersions(uuid)
+		vers, err := s.pm.SubscriptionVersions(uuid)
 		if err != nil {
 			handleInternalServerError(w, err)
 			return
 		}
 		writeJSON(w, vers)
 	case len(parts) == 2 && parts[1] == "restore" && r.Method == http.MethodPost:
-		if p.Get(uuid) == nil {
+		if s.pm.Get(uuid) == nil {
 			handleError(w, fmt.Errorf("no provider with uuid: %s", uuid), http.StatusNotFound)
 			return
 		}
-		if err := p.RestoreSubscription(uuid, r.URL.Query().Get("version")); err != nil {
+		if err := s.pm.RestoreSubscription(uuid, r.URL.Query().Get("version")); err != nil {
 			handleError(w, err, http.StatusBadRequest)
 			return
 		}
@@ -275,9 +333,28 @@ func (s *Server) providerHandle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// 下载订阅并保存（滚动 current/last/old）
-func (s *Server) fetchHandle(w http.ResponseWriter, r *http.Request, p *provider.Provider, uuid string) {
-	prov := p.Get(uuid)
+// storeSubscriptionNodes 下载/上传的原文经抠节点转换为 sing-box outbounds 后滚动入库
+func (s *Server) storeSubscriptionNodes(w http.ResponseWriter, uuid string, data []byte) error {
+	nodes, err := converter.NodesFromClash(data)
+	if err != nil {
+		handleError(w, err, http.StatusBadRequest)
+		return err
+	}
+	nodeJSON, err := json.Marshal(nodes)
+	if err != nil {
+		handleInternalServerError(w, err)
+		return err
+	}
+	if err := s.pm.SaveNodes(uuid, nodeJSON); err != nil {
+		handleInternalServerError(w, err)
+		return err
+	}
+	return nil
+}
+
+// 下载订阅并保存（下载 -> 抠出节点转 sing-box outbounds -> 滚动入库）
+func (s *Server) fetchHandle(w http.ResponseWriter, r *http.Request, uuid string) {
+	prov := s.pm.Get(uuid)
 	if prov == nil {
 		handleError(w, fmt.Errorf("no provider with uuid: %s", uuid), http.StatusNotFound)
 		return
@@ -292,17 +369,16 @@ func (s *Server) fetchHandle(w http.ResponseWriter, r *http.Request, p *provider
 		handleError(w, err, http.StatusBadGateway)
 		return
 	}
-	if err := p.SaveSubscription(uuid, data); err != nil {
-		handleInternalServerError(w, err)
+	if err := s.storeSubscriptionNodes(w, uuid, data); err != nil {
 		return
 	}
 	log.Printf("provider '%s' subscription updated: %d bytes", prov.Name, len(data))
 	writeJSON(w, map[string]any{"ok": true, "bytes": len(data)})
 }
 
-// 上传配置文件并保存（滚动 current/last/old）
-func (s *Server) uploadHandle(w http.ResponseWriter, r *http.Request, p *provider.Provider, uuid string) {
-	prov := p.Get(uuid)
+// 上传配置文件并保存（原文 -> 抠出节点转 sing-box outbounds -> 滚动入库）
+func (s *Server) uploadHandle(w http.ResponseWriter, r *http.Request, uuid string) {
+	prov := s.pm.Get(uuid)
 	if prov == nil {
 		handleError(w, fmt.Errorf("no provider with uuid: %s", uuid), http.StatusNotFound)
 		return
@@ -328,17 +404,16 @@ func (s *Server) uploadHandle(w http.ResponseWriter, r *http.Request, p *provide
 		handleError(w, fmt.Errorf("uploaded file is empty"), http.StatusBadRequest)
 		return
 	}
-	if err := p.SaveSubscription(uuid, data); err != nil {
-		handleInternalServerError(w, err)
+	if err := s.storeSubscriptionNodes(w, uuid, data); err != nil {
 		return
 	}
 	// 记录上传文件名
-	if err := p.SetFileName(uuid, header.Filename); err != nil {
+	if err := s.pm.SetFileName(uuid, header.Filename); err != nil {
 		handleInternalServerError(w, err)
 		return
 	}
 	log.Printf("provider '%s' subscription uploaded: %d bytes", prov.Name, len(data))
-	writeJSON(w, map[string]any{"ok": true, "bytes": len(data), "file_name": p.Get(uuid).FileName})
+	writeJSON(w, map[string]any{"ok": true, "bytes": len(data), "file_name": s.pm.Get(uuid).FileName})
 }
 
 // ================= template API =================
@@ -512,14 +587,19 @@ func (s *Server) configHandle(w http.ResponseWriter, r *http.Request) {
 		handleInternalServerError(w, err)
 		return
 	}
-	if p.Get(uuid) == nil {
+	if s.pm.Get(uuid) == nil {
 		handleError(w, fmt.Errorf("no provider with uuid: %s", uuid), http.StatusNotFound)
 		return
 	}
-	// 读取当前订阅
-	data, err := p.ReadSubscription(uuid)
+	// 读取当前节点（sing-box outbounds）
+	nodesData, err := s.pm.ReadSubscription(uuid)
 	if err != nil {
 		handleError(w, err, http.StatusNotFound)
+		return
+	}
+	var nodes []map[string]any
+	if err := json.Unmarshal(nodesData, &nodes); err != nil {
+		handleError(w, fmt.Errorf("parse provider nodes error: %w", err), http.StatusBadRequest)
 		return
 	}
 
@@ -555,7 +635,7 @@ func (s *Server) configHandle(w http.ResponseWriter, r *http.Request) {
 		handleInternalServerError(w, err)
 		return
 	}
-	sb, err := conv.Convert(data)
+	sb, err := conv.Build(nodes)
 	if err != nil {
 		handleError(w, err, http.StatusBadRequest)
 		return

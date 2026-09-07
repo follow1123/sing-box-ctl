@@ -113,25 +113,31 @@ async function submit(): Promise<void> {
     toast.warn('URL 必须是 http(s) 地址')
     return
   }
-  if (form.value.source === 'upload' && !fileInput.value) {
+  // 新增 upload 来源必须带文件；编辑时可不换文件（只改元数据）
+  if (!editingUuid.value && form.value.source === 'upload' && !fileInput.value) {
     toast.warn('请选择要上传的配置文件')
     return
   }
   try {
     if (editingUuid.value) {
+      // 编辑：元数据走 JSON PUT；upload 来源若重新选了文件则再上传覆盖
       await api(`/api/providers/${editingUuid.value}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form.value),
       })
-      await uploadFile(editingUuid.value)
+      if (form.value.source === 'upload' && fileInput.value) {
+        await uploadFile(editingUuid.value)
+      }
     } else {
-      const created = await api<ProviderConfig>('/api/providers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form.value),
-      })
-      await uploadFile(created.uuid)
+      // 新增：multipart 一步式——后端解析出节点成功后才创建条目
+      const fd = new FormData()
+      fd.append('name', form.value.name)
+      fd.append('source', form.value.source)
+      if (form.value.message) fd.append('message', form.value.message)
+      if (form.value.source === 'url') fd.append('url', form.value.url)
+      if (form.value.source === 'upload' && fileInput.value) fd.append('file', fileInput.value)
+      await api('/api/providers', { method: 'POST', body: fd })
     }
     toast.info((editingUuid.value ? '已保存' : '已添加') + '「' + form.value.name + '」')
     closeForm()

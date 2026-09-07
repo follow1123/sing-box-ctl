@@ -2,6 +2,7 @@ package webui
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -41,6 +42,40 @@ func postTemplate(t *testing.T, ts *httptest.Server, name, from string) (int, st
 	data, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	return resp.StatusCode, string(data)
+}
+
+// postProviderMultipart 以 multipart 表单一步创建 provider（与真实前端一致）
+func postProviderMultipart(t *testing.T, ts *httptest.Server, name, url, source, content string) (int, string) {
+	t.Helper()
+	body := &strings.Builder{}
+	w := multipart.NewWriter(body)
+	require.NoError(t, w.WriteField("name", name))
+	require.NoError(t, w.WriteField("source", source))
+	if url != "" {
+		require.NoError(t, w.WriteField("url", url))
+	}
+	if content != "" {
+		fw, err := w.CreateFormFile("file", "sub.yaml")
+		require.NoError(t, err)
+		_, err = fw.Write([]byte(content))
+		require.NoError(t, err)
+	}
+	require.NoError(t, w.Close())
+
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/providers", strings.NewReader(body.String()))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return resp.StatusCode, string(data)
+}
+
+// clashYAML 生成最小可用订阅（节点名中性占位）
+func clashYAML(tag string) string {
+	return fmt.Sprintf("proxies:\n  - name: %s\n    type: ss\n    server: 1.2.3.4\n    port: 8388\n    cipher: aes-128-gcm\n    password: x\n", tag)
 }
 
 func TestTemplatesEmptyOnFreshWorkingDir(t *testing.T) {
@@ -209,16 +244,13 @@ func TestProviderVersionsRestoreAPI(t *testing.T) {
 	ts := newTestServer(t)
 	defer ts.Close()
 
-	// 添加 upload 来源 provider
-	reqBody := `{"name":"p","source":"upload"}`
-	resp, err := http.Post(ts.URL+"/api/providers", "application/json", strings.NewReader(reqBody))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	// multipart 一步创建 upload 来源 provider（首版内容随创建一起带上）
+	code, body := postProviderMultipart(t, ts, "p", "", "upload", clashYAML("节点-0"))
+	require.Equal(t, http.StatusCreated, code)
 	var created struct {
 		Uuid string `json:"uuid"`
 	}
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&created))
+	require.NoError(t, json.Unmarshal([]byte(body), &created))
 	uuid := created.Uuid
 
 	upload := func(content string) {
@@ -238,9 +270,9 @@ func TestProviderVersionsRestoreAPI(t *testing.T) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	}
 
-	upload("c0")
-	upload("c1")
-	upload("c2")
+	// 再上传两版产生 last/old
+	upload(clashYAML("节点-1"))
+	upload(clashYAML("节点-2"))
 
 	code, vBody := getBody(t, ts.URL+"/api/providers/"+uuid+"/versions")
 	require.Equal(t, http.StatusOK, code)
@@ -251,4 +283,71 @@ func TestProviderVersionsRestoreAPI(t *testing.T) {
 	require.NoError(t, err)
 	r.Body.Close()
 	require.Equal(t, http.StatusOK, r.StatusCode)
+}
+
+// 上传内容格式不对时不应创建任何 provider（不留空壳条目）
+func TestProviderCreateRejectsInvalidContent(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+
+	cases := []struct {
+		name, url, source, content, wantErr string
+	}{
+		{"bad-yaml", "", "upload", "not a valid yaml", "unmarshal clash yaml"},
+		{"empty-proxies", "", "upload", "proxies: []\n", "no valid proxies"},
+		{"upload-no-file", "", "upload", "", "get file from form"},
+		{"url-no-url", "", "url", "", "url is required"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			code, body := postProviderMultipart(t, ts, c.name, c.url, c.source, c.content)
+			require.Equal(t, http.StatusBadRequest, code)
+			require.Contains(t, body, c.wantErr)
+		})
+	}
+
+	// 列表仍为空
+	code, listBody := getBody(t, ts.URL+"/api/providers")
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, "[]", strings.TrimSpace(listBody))
+}
+
+// url 来源一步创建：后端直接下载订阅并入库节点
+func TestProviderCreateWithURL(t *testing.T) {
+	sub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, clashYAML("节点-x"))
+	}))
+	defer sub.Close()
+
+	ts := newTestServer(t)
+	defer ts.Close()
+
+	code, body := postProviderMultipart(t, ts, "url-p", sub.URL+"/sub.yaml", "url", "")
+	require.Equal(t, http.StatusCreated, code)
+	var created struct {
+		Uuid   string `json:"uuid"`
+		Source string `json:"source"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &created))
+	require.Equal(t, "url", created.Source)
+
+	// 一个版本已入库
+	vcode, vBody := getBody(t, ts.URL+"/api/providers/"+created.Uuid+"/versions")
+	require.Equal(t, http.StatusOK, vcode)
+	require.Equal(t, `["current"]`, strings.TrimSpace(vBody))
+
+	// 下载失败也不创建
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer dead.Close()
+	code, _ = postProviderMultipart(t, ts, "bad-url", dead.URL+"/sub.yaml", "url", "")
+	require.Equal(t, http.StatusBadGateway, code)
+
+	code, listBody := getBody(t, ts.URL+"/api/providers")
+	require.Equal(t, http.StatusOK, code)
+	var list []map[string]any
+	require.NoError(t, json.Unmarshal([]byte(listBody), &list))
+	require.Len(t, list, 1)
+	require.Equal(t, "url-p", list[0]["name"])
 }

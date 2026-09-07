@@ -21,31 +21,70 @@ func New(singboxTemplateConfigPath string) (*Converter, error) {
 	return &Converter{tmpl: tmplConf}, nil
 }
 
+// NodesFromClash 解析 clash 订阅，仅提取其中的节点并转换为 sing-box outbounds
+// （不含订阅的 rules/groups 等）。供订阅入库前调用——入库即最终节点形态，
+// 后续生成配置不再依赖订阅原文。
+func NodesFromClash(clashData []byte) ([]map[string]any, error) {
+	clash := &Clash{}
+	if err := yaml.Unmarshal(clashData, clash); err != nil {
+		return nil, fmt.Errorf("unmarshal clash yaml config error:\n\t%w", err)
+	}
+	nodes, names := convertNodes(clash.Proxies)
+	if len(names) == 0 {
+		return nil, fmt.Errorf("no valid proxies in subscription")
+	}
+	return nodes, nil
+}
+
 // Convert 将 clash 订阅转换为 sing-box 配置：
 //   - 只解析订阅中的节点（proxies），不解析订阅规则（rules）
 //   - 模板的 dns/route/rule_set、inbounds、services 等原样保留
 //   - inbounds 的启停由 settings 根据 URL 参数控制，这里不做截断
 //   - outbounds 中 tag 含 @ 表达式的组会被填充节点（见 resolveOutboundExpr）
 func (c *Converter) Convert(clashData []byte) (*SingBox, error) {
-	clash := &Clash{}
-	if err := yaml.Unmarshal(clashData, clash); err != nil {
-		return nil, fmt.Errorf("unmarshal clash yaml config error:\n\t%w", err)
+	nodes, err := NodesFromClash(clashData)
+	if err != nil {
+		return nil, err
 	}
+	return c.Build(nodes)
+}
 
-	// 生成节点 outbounds
-	nodeOutbounds, nodeNames := convertNodes(clash.Proxies)
-	if len(nodeNames) == 0 {
+// Build 以已加载的模板为基础，把订阅节点 outbounds 前置为最终 outbounds，
+// 并解析模板组 tag 中的 @ 表达式（见 resolveOutboundExpr）。
+// 不改动接收者，每次返回全新配置。
+func (c *Converter) Build(nodes []map[string]any) (*SingBox, error) {
+	if len(nodes) == 0 {
 		return nil, fmt.Errorf("no valid proxies in subscription")
 	}
-
-	// 填充 outbounds 中的 @ 表达式组
-	for _, ob := range c.tmpl.Outbounds {
+	tmpl, err := cloneSingBox(c.tmpl)
+	if err != nil {
+		return nil, err
+	}
+	nodeNames := make([]string, 0, len(nodes))
+	for _, ob := range nodes {
+		if tag, ok := ob["tag"].(string); ok {
+			nodeNames = append(nodeNames, tag)
+		}
+	}
+	for _, ob := range tmpl.Outbounds {
 		resolveOutboundExpr(ob, nodeNames)
 	}
-
 	// 最终 outbounds = 订阅节点 + 模板分组
-	c.tmpl.Outbounds = append(nodeOutbounds, c.tmpl.Outbounds...)
-	return c.tmpl, nil
+	tmpl.Outbounds = append(nodes, tmpl.Outbounds...)
+	return tmpl, nil
+}
+
+// cloneSingBox 深拷贝模板，保证 Build 不累积修改接收者的模板
+func cloneSingBox(sb *SingBox) (*SingBox, error) {
+	data, err := json.Marshal(sb)
+	if err != nil {
+		return nil, fmt.Errorf("clone template error:\n\t%w", err)
+	}
+	clone := &SingBox{}
+	if err := json.Unmarshal(data, clone); err != nil {
+		return nil, fmt.Errorf("clone template error:\n\t%w", err)
+	}
+	return clone, nil
 }
 
 // convertNodes 将 clash 节点转换为 sing-box outbound
@@ -168,6 +207,7 @@ func setNetwork(ob map[string]any, p Proxy) {
 //   - "组名@keywords=台湾,tw"  -> 填充包含任一关键词的节点
 //   - "组名@exclude=美国,mg"   -> 填充不包含任一关键词的节点
 //   - 无 @ 的组原样保留
+//
 // 筛选出的节点 append 到该组已有的 outbounds 之后，tag 还原为组名
 func resolveOutboundExpr(ob map[string]any, nodeNames []string) {
 	tag, _ := ob["tag"].(string)

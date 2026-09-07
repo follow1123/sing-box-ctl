@@ -1,6 +1,7 @@
 package provider_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -32,23 +33,25 @@ func TestTemplateVersionsAndRestore(t *testing.T) {
 }
 
 func TestSubscriptionVersionsAndRestore(t *testing.T) {
-	p, _ := newProvider(t)
-	uuid, err := p.Add("sub", "", "upload", "")
+	pm, _ := newManager(t)
+	uuid, err := pm.Add("sub", "", "upload", "")
 	require.NoError(t, err)
 
-	require.NoError(t, p.SaveSubscription(uuid, []byte("s0")))
-	vers, err := p.SubscriptionVersions(uuid)
+	require.NoError(t, pm.SaveNodes(uuid, nodesJSON(t, "节点-a")))
+	vers, err := pm.SubscriptionVersions(uuid)
 	require.NoError(t, err)
 	require.Equal(t, []string{"current"}, vers)
 
-	require.NoError(t, p.SaveSubscription(uuid, []byte("s1")))
-	require.NoError(t, p.SaveSubscription(uuid, []byte("s2")))
-	vers, err = p.SubscriptionVersions(uuid)
+	require.NoError(t, pm.SaveNodes(uuid, nodesJSON(t, "节点-b")))
+	require.NoError(t, pm.SaveNodes(uuid, nodesJSON(t, "节点-c")))
+	vers, err = pm.SubscriptionVersions(uuid)
 	require.NoError(t, err)
 	require.Equal(t, []string{"current", "last", "old"}, vers)
 
-	require.NoError(t, p.RestoreSubscription(uuid, "old"))
-	data, err := p.ReadSubscription(uuid)
+	require.NoError(t, pm.RestoreSubscription(uuid, "old"))
+	data, err := pm.ReadSubscription(uuid)
 	require.NoError(t, err)
-	require.Equal(t, "s0", string(data))
+	var nodes []map[string]any
+	require.NoError(t, json.Unmarshal(data, &nodes))
+	require.Equal(t, "节点-a", nodes[0]["tag"])
 }
