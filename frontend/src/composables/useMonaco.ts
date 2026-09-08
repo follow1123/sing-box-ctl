@@ -10,6 +10,9 @@ self.MonacoEnvironment = {
   getWorker: () => new JsonWorker(),
 }
 
+// 已知问题：控制台偶发输出 [createInstance] ... UNKNOWN service ICodeLensCache，
+// 属 monaco 编辑器创建时的内部告警，不影响编辑/校验/补全，暂未定位，待后续验证。
+
 // json 语言服务类型补丁（见 vite-env.d.ts）
 type JsonDiagnosticsOptions = Parameters<typeof jsonDefaults.setDiagnosticsOptions>[0]
 

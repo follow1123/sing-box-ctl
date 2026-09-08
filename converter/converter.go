@@ -154,6 +154,9 @@ func convertNodes(proxies []Proxy) ([]map[string]any, []string) {
 			ob["password"] = p.Password
 			ob["tls"] = buildTls(p)
 		default:
+			// TODO(未知协议提示): 目前只打印日志并跳过该节点；若订阅整体无有效节点，
+			// 上层（创建/更新/上传）会以 “no valid proxies” 报错。后续可把
+			// “跳过 N 个未知协议节点”的统计反馈给前端提示。
 			fmt.Printf("unsupport protocol: %v\n", p.Type)
 			continue
 		}

@@ -20,6 +20,8 @@ func readFileContent(path string) (string, bool) {
 }
 
 // DataFromSource 从 url 或本地文件读取数据
+// TODO(下载可控性): 使用 http 默认客户端，暂无超时与自定义 User-Agent / 请求头，
+// 部分订阅源可能拒绝访问或需要携带 UA，后续接入 http_clients 时一并处理。
 func DataFromSource(source string) ([]byte, error) {
 	var data bytes.Buffer
 	if isHTTPURL(source) {
