@@ -243,6 +243,11 @@ onMounted(async () => {
     ])
     providers.value = ps
     templates.value = ts
+    // provider 尚未选择时默认选中默认 provider（与模板页的默认逻辑一致）
+    if (!providerUuid.value) {
+      const defP = ps.find((p) => p.default)
+      if (defP) providerUuid.value = defP.uuid
+    }
     const def = ts.find((t) => t.default)
     if (def) templateUuid.value = def.uuid
     // 初始回填默认模板配置
@@ -276,14 +281,16 @@ onMounted(async () => {
     <div class="select-grid">
       <Card title="Provider">
         <Select v-model="providerUuid" placeholder="-- 选择 provider --">
-          <option v-for="p in providers" :key="p.uuid" :value="p.uuid">{{ p.name }}</option>
+          <option v-for="p in providers" :key="p.uuid" :value="p.uuid">
+            {{ p.default ? '（默认）' : '' }}{{ p.name }}
+          </option>
         </Select>
       </Card>
       <Card title="模板">
         <Select v-model="templateUuid" @change="applyTemplateDefaults">
           <option v-if="templates.length === 0" value="" disabled>暂无模板，请先在模板页新建</option>
           <option v-for="t in templates" :key="t.uuid" :value="t.uuid">
-            {{ t.name }}{{ t.default ? '（默认）' : '' }}
+            {{ t.default ? '（默认）' : '' }}{{ t.name }}
           </option>
         </Select>
       </Card>

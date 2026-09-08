@@ -158,6 +158,16 @@ async function remove(p: ProviderConfig): Promise<void> {
   }
 }
 
+async function setDefault(p: ProviderConfig): Promise<void> {
+  try {
+    await api(`/api/providers/${p.uuid}/default`, { method: 'POST' })
+    toast.info('已设「' + p.name + '」为默认')
+    await load()
+  } catch (e) {
+    toast.error('设置默认失败: ' + (e as Error).message)
+  }
+}
+
 async function fetchSub(p: ProviderConfig): Promise<void> {
   if (!confirm(`更新 ${p.name} 的订阅？`)) return
   try {
@@ -203,12 +213,14 @@ onMounted(load)
         <div class="pcard-head">
           <span class="pcard-name">{{ p.name }}</span>
           <span class="src-tag">{{ p.source }}</span>
+          <span v-if="p.default" class="src-tag">默认</span>
         </div>
         <div class="pcard-src" :title="p.source === 'upload' ? (p.file_name || '') : p.url">
           {{ p.source === 'upload' ? (p.file_name || '已上传配置') : p.url }}
         </div>
         <div v-if="p.message" class="pcard-msg">{{ p.message }}</div>
         <div class="pcard-actions">
+          <Btn v-if="!p.default" size="sm" @click="setDefault(p)">设为默认</Btn>
           <Btn size="sm" @click="openEdit(p)">编辑</Btn>
           <Btn size="sm" variant="primary" @click="p.source === 'upload' ? uploadSub(p) : fetchSub(p)">
             {{ p.source === 'upload' ? '上传' : '更新' }}

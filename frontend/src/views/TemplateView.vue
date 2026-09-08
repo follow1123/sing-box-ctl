@@ -283,7 +283,7 @@ onMounted(async () => {
           @change="onSelectChange"
         >
           <option v-for="t in templates" :key="t.uuid" :value="t.uuid">
-            {{ t.default ? '默认 ' : '' }}{{ t.name }}
+            {{ t.default ? '（默认）' : '' }}{{ t.name }}
           </option>
         </Select>
 
@@ -314,7 +314,7 @@ onMounted(async () => {
         <Select v-model="createFrom">
           <option value="builtin">内置默认模板</option>
           <option v-for="t in templates" :key="t.uuid" :value="t.uuid">
-            {{ t.name }}{{ t.default ? '（默认）' : '' }}
+            {{ t.default ? '（默认）' : '' }}{{ t.name }}
           </option>
         </Select>
       </Field>

@@ -7,6 +7,7 @@ export interface ProviderConfig {
   source: 'url' | 'upload'
   message?: string
   file_name?: string
+  default?: boolean
 }
 
 export interface ProviderRequest {

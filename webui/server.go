@@ -306,6 +306,16 @@ func (s *Server) providerHandle(w http.ResponseWriter, r *http.Request) {
 		s.fetchHandle(w, r, uuid)
 	case len(parts) == 2 && parts[1] == "upload" && r.Method == http.MethodPost:
 		s.uploadHandle(w, r, uuid)
+	case len(parts) == 2 && parts[1] == "default" && r.Method == http.MethodPost:
+		if s.pm.Get(uuid) == nil {
+			handleError(w, fmt.Errorf("no provider with uuid: %s", uuid), http.StatusNotFound)
+			return
+		}
+		if err := s.pm.SetDefaultProvider(uuid); err != nil {
+			handleInternalServerError(w, err)
+			return
+		}
+		writeJSON(w, s.pm.Get(uuid))
 	case len(parts) == 2 && parts[1] == "versions" && r.Method == http.MethodGet:
 		if s.pm.Get(uuid) == nil {
 			handleError(w, fmt.Errorf("no provider with uuid: %s", uuid), http.StatusNotFound)

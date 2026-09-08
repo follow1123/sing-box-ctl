@@ -351,3 +351,63 @@ func TestProviderCreateWithURL(t *testing.T) {
 	require.Len(t, list, 1)
 	require.Equal(t, "url-p", list[0]["name"])
 }
+
+// 设为默认 provider：列表带 default 标记，可切换
+func TestProviderDefaultAPI(t *testing.T) {
+	sub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, clashYAML("节点-x"))
+	}))
+	defer sub.Close()
+
+	ts := newTestServer(t)
+	defer ts.Close()
+
+	_, body1 := postProviderMultipart(t, ts, "p1", sub.URL, "url", "")
+	_, body2 := postProviderMultipart(t, ts, "p2", sub.URL, "url", "")
+	var p1, p2 struct {
+		Uuid string `json:"uuid"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body1), &p1))
+	require.NoError(t, json.Unmarshal([]byte(body2), &p2))
+
+	listDefault := func() map[string]bool {
+		code, lb := getBody(t, ts.URL+"/api/providers")
+		require.Equal(t, http.StatusOK, code)
+		var list []map[string]any
+		require.NoError(t, json.Unmarshal([]byte(lb), &list))
+		res := map[string]bool{}
+		for _, it := range list {
+			res[it["uuid"].(string)] = it["default"].(bool)
+		}
+		return res
+	}
+
+	// 初始都非默认
+	flags := listDefault()
+	require.False(t, flags[p1.Uuid])
+	require.False(t, flags[p2.Uuid])
+
+	// 设 p1 默认
+	resp, err := http.Post(ts.URL+"/api/providers/"+p1.Uuid+"/default", "", nil)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	flags = listDefault()
+	require.True(t, flags[p1.Uuid])
+	require.False(t, flags[p2.Uuid])
+
+	// 切到 p2
+	resp, err = http.Post(ts.URL+"/api/providers/"+p2.Uuid+"/default", "", nil)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	flags = listDefault()
+	require.False(t, flags[p1.Uuid])
+	require.True(t, flags[p2.Uuid])
+
+	// 不存在的 uuid
+	resp, err = http.Post(ts.URL+"/api/providers/no-such/default", "", nil)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+}

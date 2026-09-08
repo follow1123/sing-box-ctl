@@ -361,6 +361,7 @@ func (pm *ProviderManager) Get(uuid string) *ProviderConfig {
 		return nil
 	}
 	conf := pm.data.Providers[idx].ProviderConfig
+	conf.Default = uuid == pm.data.DefaultProvider
 	return &conf
 }
 
@@ -370,7 +371,9 @@ func (pm *ProviderManager) List() []ProviderConfig {
 	defer pm.mu.Unlock()
 	list := make([]ProviderConfig, 0, len(pm.data.Providers))
 	for _, e := range pm.data.Providers {
-		list = append(list, e.ProviderConfig)
+		conf := e.ProviderConfig
+		conf.Default = conf.Uuid == pm.data.DefaultProvider
+		list = append(list, conf)
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
 	return list

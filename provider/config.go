@@ -15,4 +15,6 @@ type ProviderConfig struct {
 	Message string `json:"message,omitempty"`
 	// FileName 仅 source=upload 时有意义，记录最近一次上传的文件名
 	FileName string `json:"file_name,omitempty"`
+	// Default 是否为默认 provider（uuid == default_provider）
+	Default bool `json:"default"`
 }
