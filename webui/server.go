@@ -42,6 +42,7 @@ type Server struct {
 	certFile   string
 	keyFile    string
 	pm         *provider.ProviderManager
+	tm         *provider.TemplateManager
 	server     *http.Server
 }
 
@@ -55,20 +56,24 @@ type Options struct {
 }
 
 func New(opts Options) (*Server, error) {
-	// 先解析为绝对路径，便于后续日志与每次请求重建 provider 时保持一致
-	p, err := provider.New(opts.WorkingDir)
+	// 解析为绝对路径，便于日志与数据目录定位
+	if opts.WorkingDir == "" {
+		return nil, fmt.Errorf("working dir is required")
+	}
+	absDir, err := filepath.Abs(os.ExpandEnv(opts.WorkingDir))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve working dir error:\n\t%w", err)
 	}
-	absDir := p.WorkingDir()
-	if err := initWorkingDir(absDir); err != nil {
-		return nil, err
-	}
+	absDir = filepath.Clean(absDir)
 	pm, err := provider.NewManager(absDir)
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{workingDir: absDir, certFile: opts.CertFile, keyFile: opts.KeyFile, pm: pm}
+	tm, err := provider.NewTemplateManager(absDir)
+	if err != nil {
+		return nil, err
+	}
+	s := &Server{workingDir: absDir, certFile: opts.CertFile, keyFile: opts.KeyFile, pm: pm, tm: tm}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(apiPath, s.providersHandle)
@@ -90,21 +95,6 @@ func New(opts Options) (*Server, error) {
 		Handler: recoverMiddleware(mux),
 	}
 	return s, nil
-}
-
-// initWorkingDir 初始化工作目录（providers/templates 目录），并保证存在一个默认模板
-func initWorkingDir(workingDir string) error {
-	p, err := provider.New(workingDir)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(p.ProvidersDir(), 0700); err != nil {
-		return fmt.Errorf("init providers dir error:\n\t%w", err)
-	}
-	if err := os.MkdirAll(p.TemplatesDir(), 0700); err != nil {
-		return fmt.Errorf("init templates dir error:\n\t%w", err)
-	}
-	return nil
 }
 
 func (s *Server) Serve() error {
@@ -148,10 +138,6 @@ func recoverMiddleware(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(w, r)
 	})
-}
-
-func (s *Server) newProvider() (*provider.Provider, error) {
-	return provider.New(s.workingDir)
 }
 
 // spaHandle 返回前端入口（Vite 构建的 index.html）
@@ -436,43 +422,32 @@ func isValidTemplateUuid(uuid string) bool {
 // GET /api/templates -> 模板列表 [{uuid,name,default}]
 // POST /api/templates?name=xxx&from=builtin|<uuid> -> 新建模板（复制来源内容）
 func (s *Server) templatesHandle(w http.ResponseWriter, r *http.Request) {
-	p, err := s.newProvider()
-	if err != nil {
-		handleInternalServerError(w, err)
-		return
-	}
-
 	switch r.Method {
 	case http.MethodGet:
-		infos, err := p.ListTemplates()
-		if err != nil {
-			handleInternalServerError(w, err)
-			return
-		}
-		writeJSON(w, infos)
+		writeJSON(w, s.tm.ListTemplates())
 	case http.MethodPost:
 		name := r.URL.Query().Get("name")
 		if name == "" {
 			handleError(w, fmt.Errorf("name is required"), http.StatusBadRequest)
 			return
 		}
-		source, err := resolveTemplateSource(p, r.URL.Query().Get("from"))
+		source, err := resolveTemplateSource(s.tm, r.URL.Query().Get("from"))
 		if err != nil {
 			handleError(w, err, http.StatusBadRequest)
 			return
 		}
-		uuid, err := p.AddTemplate(name)
+		uuid, err := s.tm.AddTemplate(name)
 		if err != nil {
 			handleError(w, err, http.StatusBadRequest)
 			return
 		}
 		// 内容来自来源（内置种子或已有用户模板）
-		if err := p.SaveTemplate(uuid, source); err != nil {
+		if err := s.tm.SaveTemplate(uuid, source); err != nil {
 			handleInternalServerError(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
-		writeJSON(w, p.GetTemplate(uuid))
+		writeJSON(w, s.tm.GetTemplate(uuid))
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -480,14 +455,14 @@ func (s *Server) templatesHandle(w http.ResponseWriter, r *http.Request) {
 
 // resolveTemplateSource 解析新建模板的来源内容：缺省或 from=builtin 使用内嵌种子模板；
 // from=<uuid> 复制已有用户模板内容
-func resolveTemplateSource(p *provider.Provider, from string) ([]byte, error) {
+func resolveTemplateSource(tm *provider.TemplateManager, from string) ([]byte, error) {
 	if from == "" || from == BuiltinTemplateKey {
 		return templateSeedData, nil
 	}
-	if !isValidTemplateUuid(from) || !p.TemplateExists(from) {
+	if !isValidTemplateUuid(from) || !tm.TemplateExists(from) {
 		return nil, fmt.Errorf("template source not found: %s", from)
 	}
-	data, err := p.ReadTemplate(from)
+	data, err := tm.ReadTemplate(from)
 	if err != nil {
 		return nil, fmt.Errorf("read template source error:\n\t%w", err)
 	}
@@ -499,12 +474,6 @@ func resolveTemplateSource(p *provider.Provider, from string) ([]byte, error) {
 // DELETE /api/templates/<uuid> -> 删除模板（默认模板不可删）
 // POST /api/templates/<uuid>/default -> 设为默认
 func (s *Server) templateHandle(w http.ResponseWriter, r *http.Request) {
-	p, err := s.newProvider()
-	if err != nil {
-		handleInternalServerError(w, err)
-		return
-	}
-
 	rest := strings.TrimPrefix(r.URL.Path, apiTemplatesPath+"/")
 	parts := strings.Split(rest, "/")
 	if len(parts) < 1 || !isValidTemplateUuid(parts[0]) {
@@ -512,7 +481,7 @@ func (s *Server) templateHandle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uuid := parts[0]
-	info := p.GetTemplate(uuid)
+	info := s.tm.GetTemplate(uuid)
 	if info == nil {
 		handleError(w, fmt.Errorf("no template with uuid: %s", uuid), http.StatusNotFound)
 		return
@@ -520,7 +489,7 @@ func (s *Server) templateHandle(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case len(parts) == 1 && r.Method == http.MethodGet:
-		data, err := p.ReadTemplate(uuid)
+		data, err := s.tm.ReadTemplate(uuid)
 		if err != nil {
 			handleError(w, err, http.StatusNotFound)
 			return
@@ -537,7 +506,7 @@ func (s *Server) templateHandle(w http.ResponseWriter, r *http.Request) {
 			handleError(w, fmt.Errorf("invalid json content"), http.StatusBadRequest)
 			return
 		}
-		if err := p.SaveTemplate(uuid, data); err != nil {
+		if err := s.tm.SaveTemplate(uuid, data); err != nil {
 			handleInternalServerError(w, err)
 			return
 		}
@@ -548,26 +517,26 @@ func (s *Server) templateHandle(w http.ResponseWriter, r *http.Request) {
 			handleError(w, fmt.Errorf("default template cannot be deleted"), http.StatusBadRequest)
 			return
 		}
-		if err := p.DeleteTemplate(uuid); err != nil {
+		if err := s.tm.DeleteTemplate(uuid); err != nil {
 			handleInternalServerError(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	case len(parts) == 2 && parts[1] == "default" && r.Method == http.MethodPost:
-		if err := p.SetDefaultTemplate(uuid); err != nil {
+		if err := s.tm.SetDefaultTemplate(uuid); err != nil {
 			handleInternalServerError(w, err)
 			return
 		}
-		writeJSON(w, p.GetTemplate(uuid))
+		writeJSON(w, s.tm.GetTemplate(uuid))
 	case len(parts) == 2 && parts[1] == "versions" && r.Method == http.MethodGet:
-		vers, err := p.TemplateVersions(uuid)
+		vers, err := s.tm.TemplateVersions(uuid)
 		if err != nil {
 			handleInternalServerError(w, err)
 			return
 		}
 		writeJSON(w, vers)
 	case len(parts) == 2 && parts[1] == "restore" && r.Method == http.MethodPost:
-		if err := p.RestoreTemplate(uuid, r.URL.Query().Get("version")); err != nil {
+		if err := s.tm.RestoreTemplate(uuid, r.URL.Query().Get("version")); err != nil {
 			handleError(w, err, http.StatusBadRequest)
 			return
 		}
@@ -592,11 +561,6 @@ func (s *Server) configHandle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p, err := s.newProvider()
-	if err != nil {
-		handleInternalServerError(w, err)
-		return
-	}
 	if s.pm.Get(uuid) == nil {
 		handleError(w, fmt.Errorf("no provider with uuid: %s", uuid), http.StatusNotFound)
 		return
@@ -616,19 +580,19 @@ func (s *Server) configHandle(w http.ResponseWriter, r *http.Request) {
 	// 选择模板（uuid，缺省用默认模板）
 	template := r.URL.Query().Get("template")
 	if template == "" {
-		template, err = p.DefaultTemplate()
+		template, err = s.tm.DefaultTemplate()
 		if err != nil {
 			handleError(w, fmt.Errorf("no template available, create one first"), http.StatusNotFound)
 			return
 		}
 	}
-	if !isValidTemplateUuid(template) || !p.TemplateExists(template) {
+	if !isValidTemplateUuid(template) || !s.tm.TemplateExists(template) {
 		handleError(w, fmt.Errorf("template not found"), http.StatusNotFound)
 		return
 	}
 
 	// 读取模板原始配置（settings 需要默认 mixed/tun inbound、api service）
-	tmplData, err := p.ReadTemplate(template)
+	tmplData, err := s.tm.ReadTemplate(template)
 	if err != nil {
 		handleError(w, err, http.StatusNotFound)
 		return
@@ -639,8 +603,8 @@ func (s *Server) configHandle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 实时转换订阅为 sing-box 配置
-	conv, err := converter.New(filepath.Join(p.TemplateDir(template), "current"))
+	// 实时合成：订阅节点 + 模板
+	conv, err := converter.NewFromData(tmplData)
 	if err != nil {
 		handleInternalServerError(w, err)
 		return

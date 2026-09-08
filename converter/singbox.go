@@ -40,7 +40,7 @@ type Route struct {
 	OverrideAndroidVpn         bool             `json:"override_android_vpn,omitempty"`
 	DefaultInterface           string           `json:"default_interface,omitempty"`
 	DefaultMark                int              `json:"default_mark,omitempty"`
-	DefaultHttpClient         string           `json:"default_http_client,omitempty"`
+	DefaultHttpClient          string           `json:"default_http_client,omitempty"`
 	FindProcess                bool             `json:"find_process,omitempty"`
 	FindNeighbor               bool             `json:"find_neighbor,omitempty"`
 	DhcpLeaseFiles             []string         `json:"dhcp_lease_files,omitempty"`

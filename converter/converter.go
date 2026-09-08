@@ -263,9 +263,23 @@ func LoadSingboxFromPath(singboxPath string) (*SingBox, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s error:\n\t%w", singboxPath, err)
 	}
+	return LoadSingboxFromData(data)
+}
+
+// LoadSingboxFromData 从内存中的模板 JSON 解析 sing-box 配置
+func LoadSingboxFromData(data []byte) (*SingBox, error) {
 	sb := &SingBox{}
 	if err := json.Unmarshal(data, sb); err != nil {
-		return nil, fmt.Errorf("unmarshal json file %s error: \n\t%w", singboxPath, err)
+		return nil, fmt.Errorf("unmarshal template json error:\n\t%w", err)
 	}
 	return sb, nil
+}
+
+// NewFromData 以内存中的模板 JSON 构造转换器（模板由调用方持有内容时用）
+func NewFromData(tmplData []byte) (*Converter, error) {
+	tmpl, err := LoadSingboxFromData(tmplData)
+	if err != nil {
+		return nil, err
+	}
+	return &Converter{tmpl: tmpl}, nil
 }

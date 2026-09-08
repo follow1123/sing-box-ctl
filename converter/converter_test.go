@@ -101,7 +101,7 @@ proxies:
 	fmt.Printf("sb.Outbounds: %v\n", sb.Outbounds)
 
 	// 节点转换（最前三个是节点）
-	assert.Equal(t, 3, len(sb.Outbounds) - 5)
+	assert.Equal(t, 3, len(sb.Outbounds)-5)
 	assert.Equal(t, "台湾-01", sb.Outbounds[0]["tag"])
 	assert.Equal(t, "日本-01", sb.Outbounds[2]["tag"])
 

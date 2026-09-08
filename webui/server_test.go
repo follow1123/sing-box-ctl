@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,6 +29,15 @@ func getBody(t *testing.T, url string) (int, string) {
 	data, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	return resp.StatusCode, string(data)
+}
+
+// assertJSONEqual 比较两个 JSON 文本的语义等价（忽略空白/缩进差异）
+func assertJSONEqual(t *testing.T, want, got string) {
+	t.Helper()
+	var wb, gb bytes.Buffer
+	require.NoError(t, json.Compact(&wb, []byte(want)))
+	require.NoError(t, json.Compact(&gb, []byte(got)))
+	require.Equal(t, wb.String(), gb.String())
 }
 
 func postTemplate(t *testing.T, ts *httptest.Server, name, from string) (int, string) {
@@ -106,7 +116,7 @@ func TestCreateTemplateFromBuiltin(t *testing.T) {
 	// 内容 = 内嵌种子
 	code, content := getBody(t, ts.URL+"/api/templates/"+created.Uuid)
 	require.Equal(t, http.StatusOK, code)
-	require.Equal(t, string(templateSeedData), content)
+	assertJSONEqual(t, string(templateSeedData), content)
 
 	// 显式 from=builtin 同理
 	code2, body2 := postTemplate(t, ts, "seed-copy-2", BuiltinTemplateKey)
@@ -116,7 +126,7 @@ func TestCreateTemplateFromBuiltin(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(body2), &created2))
 	_, content2 := getBody(t, ts.URL+"/api/templates/"+created2.Uuid)
-	require.Equal(t, string(templateSeedData), content2)
+	assertJSONEqual(t, string(templateSeedData), content2)
 }
 
 func TestCreateTemplateFromUserTemplate(t *testing.T) {
@@ -147,7 +157,7 @@ func TestCreateTemplateFromUserTemplate(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(body2), &copyT))
 
 	_, content := getBody(t, ts.URL+"/api/templates/"+copyT.Uuid)
-	require.Equal(t, modified, content)
+	assertJSONEqual(t, modified, content)
 
 	// from=不存在的模板 -> 400
 	codeBad, _ := postTemplate(t, ts, "bad", "no-such-uuid-here")
@@ -231,7 +241,7 @@ func TestTemplateVersionsRestoreAPI(t *testing.T) {
 
 	code, content := getBody(t, ts.URL+"/api/templates/"+uuid)
 	require.Equal(t, http.StatusOK, code)
-	require.Equal(t, string(templateSeedData), content)
+	assertJSONEqual(t, string(templateSeedData), content)
 
 	// 非法版本
 	resp, err = http.Post(ts.URL+"/api/templates/"+uuid+"/restore?version=nope", "", nil)

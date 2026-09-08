@@ -44,12 +44,12 @@ type SubscriptionNode struct {
 
 // 版本槽位 key（对外语义与 webui versions 接口一致）
 const (
-	subVersionCurrent = "current"
-	subVersionLast    = "last"
-	subVersionOld     = "old"
+	versionKeyCurrent = "current"
+	versionKeyLast    = "last"
+	versionKeyOld     = "old"
 )
 
-var subVersionIndex = map[string]int{subVersionCurrent: 0, subVersionLast: 1, subVersionOld: 2}
+var versionKeyIndex = map[string]int{versionKeyCurrent: 0, versionKeyLast: 1, versionKeyOld: 2}
 
 // ProviderManager 内存态管理 provider 数据；变更只改内存，由节流任务统一延迟落盘
 type ProviderManager struct {
@@ -220,7 +220,7 @@ func (pm *ProviderManager) migrateLegacy() (bool, error) {
 			entry.Message = content
 		}
 		// 订阅版本：current/last/old -> 下标 0/1/2，仅导入能解析为 clash 节点的版本
-		for _, v := range []string{versionCurrent, versionLast, versionOld} {
+		for _, v := range []string{versionKeyCurrent, versionKeyLast, versionKeyOld} {
 			raw, err := os.ReadFile(filepath.Join(dir, v))
 			if err != nil {
 				continue
@@ -516,8 +516,8 @@ func (pm *ProviderManager) SubscriptionVersions(uuid string) ([]string, error) {
 	}
 	count := len(pm.data.Providers[idx].Nodes)
 	versions := make([]string, 0, count)
-	for _, v := range []string{subVersionCurrent, subVersionLast, subVersionOld} {
-		if subVersionIndex[v] < count {
+	for _, v := range []string{versionKeyCurrent, versionKeyLast, versionKeyOld} {
+		if versionKeyIndex[v] < count {
 			versions = append(versions, v)
 		}
 	}
@@ -532,7 +532,7 @@ func (pm *ProviderManager) RestoreSubscription(uuid, version string) error {
 		pm.mu.Unlock()
 		return fmt.Errorf("no provider with uuid: %s", uuid)
 	}
-	pos, ok := subVersionIndex[version]
+	pos, ok := versionKeyIndex[version]
 	if !ok {
 		pm.mu.Unlock()
 		return fmt.Errorf("invalid version: %s", version)

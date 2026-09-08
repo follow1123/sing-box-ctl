@@ -10,15 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newProvider 构造模板文件系统 Provider（供模板相关测试使用）
-func newProvider(t *testing.T) (*provider.Provider, string) {
-	t.Helper()
-	workingDir := t.TempDir()
-	p, err := provider.New(workingDir)
-	require.NoError(t, err)
-	return p, workingDir
-}
-
 // newManager 构造 provider 数据管理器（working_dir/providers/data.json）
 func newManager(t *testing.T) (*provider.ProviderManager, string) {
 	t.Helper()
